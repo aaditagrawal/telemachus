@@ -61,8 +61,28 @@ class ScreenCapture {
     /// Callback when capture method changes (e.g. SCStream → CGDisplayStream fallback)
     var onCaptureMethodChanged: ((String) -> Void)?
 
-    var displayWidth: Int { display?.width ?? Int(CGDisplayPixelsWide(virtualDisplayID ?? 0)) }
-    var displayHeight: Int { display?.height ?? Int(CGDisplayPixelsHigh(virtualDisplayID ?? 0)) }
+    var displayWidth: Int {
+        guard let id = virtualDisplayID else { return display?.width ?? 0 }
+        return ScreenCapture.physicalSize(for: id).width
+    }
+    var displayHeight: Int {
+        guard let id = virtualDisplayID else { return display?.height ?? 0 }
+        return ScreenCapture.physicalSize(for: id).height
+    }
+
+    /// Returns physical pixel dimensions for a display ID.
+    /// CGDisplayPixelsWide/High return logical pixels on HiDPI displays — use
+    /// CGDisplayModeGetPixelWidth/Height to always get the true physical size.
+    static func physicalSize(for displayID: CGDirectDisplayID) -> (width: Int, height: Int) {
+        if let mode = CGDisplayCopyDisplayMode(displayID) {
+            let w = CGDisplayModeGetPixelWidth(mode)
+            let h = CGDisplayModeGetPixelHeight(mode)
+            if w > 0 && h > 0 { return (w, h) }
+        }
+        // Mode lookup failed — falling back to logical pixels (may be stale on HiDPI display)
+        debugLog("physicalSize fallback for display \(displayID) — CGDisplayCopyDisplayMode returned nil")
+        return (Int(CGDisplayPixelsWide(displayID)), Int(CGDisplayPixelsHigh(displayID)))
+    }
 
     init() async throws {
         let version = ProcessInfo.processInfo.operatingSystemVersion
@@ -138,13 +158,13 @@ class ScreenCapture {
     // MARK: - Stream setup
 
     private func setupStream() async throws {
-        guard let display = display else {
+        guard let display = display, let virtualDisplayID = virtualDisplayID else {
             throw NSError(domain: "ScreenCapture", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Display not initialized"])
         }
 
-        let width = display.width
-        let height = display.height
+        // Use physical pixels so the encoder captures at full Retina resolution on HiDPI
+        let (width, height) = ScreenCapture.physicalSize(for: virtualDisplayID)
         let fps = refreshRate
 
         streamOutput = StreamOutput()
@@ -379,8 +399,8 @@ class ScreenCapture {
             streamDelegate = nil
         }
 
-        let width = Int(CGDisplayPixelsWide(displayID))
-        let height = Int(CGDisplayPixelsHigh(displayID))
+        // Use physical pixels — CGDisplayPixelsWide/High return logical on HiDPI displays
+        let (width, height) = ScreenCapture.physicalSize(for: displayID)
 
         debugLog("CGDisplayStream fallback — display \(displayID) (\(width)x\(height))")
 

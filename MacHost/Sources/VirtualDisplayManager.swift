@@ -34,21 +34,27 @@ class VirtualDisplayManager {
         // Clean up existing display if any
         destroyDisplay()
 
+        // Physical pixels = 2x logical when HiDPI, 1x otherwise
+        let physW = hiDPI ? width * 2 : width
+        let physH = hiDPI ? height * 2 : height
+
         // Create display descriptor
         let descriptor = CGVirtualDisplayDescriptor()
         descriptor.name = name
-        descriptor.maxPixelsWide = UInt32(width)
-        descriptor.maxPixelsHigh = UInt32(height)
+        descriptor.maxPixelsWide = UInt32(physW)
+        descriptor.maxPixelsHigh = UInt32(physH)
 
-        // Calculate physical size (assuming ~110 PPI for tablet)
-        let ratio: Double = 25.4 / 110.0 // mm per pixel
+        // HiDPI needs high PPI so macOS recognises as Retina (≥200 PPI threshold)
+        // non-HiDPI stays at 110 PPI (typical tablet assumption)
+        let ppi: Double = hiDPI ? 220.0 : 110.0
         descriptor.sizeInMillimeters = CGSize(
-            width: Double(width) * ratio,
-            height: Double(height) * ratio
+            width: Double(physW) * 25.4 / ppi,
+            height: Double(physH) * 25.4 / ppi
         )
 
         // Set vendor/product IDs
-        descriptor.productID = UInt32(0xEEEE + width + height)
+        // Use width * 10000 + height so (3840,2400) ≠ (2400,3840) — avoids portrait/landscape collision
+        descriptor.productID = UInt32((physW * 10000 + physH) & 0xFFFFFFFF)
         descriptor.vendorID = 0xEEEE
         descriptor.serialNum = 0x0001
 
@@ -58,13 +64,23 @@ class VirtualDisplayManager {
         let settings = CGVirtualDisplaySettings()
         settings.hiDPI = hiDPI ? 1 : 0
 
-        // Create display mode
-        let mode = CGVirtualDisplayMode(
+        // HiDPI: anchor mode (physical) + logical mode
+        // The anchor tells macOS "this display is high-density" → unlocks HiDPI for logical mode
+        // non-HiDPI: single mode at requested resolution
+        var modes: [CGVirtualDisplayMode] = []
+        if hiDPI {
+            modes.append(CGVirtualDisplayMode(
+                width: UInt32(physW),
+                height: UInt32(physH),
+                refreshRate: Double(refreshRate)
+            ))
+        }
+        modes.append(CGVirtualDisplayMode(
             width: UInt32(width),
             height: UInt32(height),
             refreshRate: Double(refreshRate)
-        )
-        settings.modes = [mode]
+        ))
+        settings.modes = modes
 
         self.displaySettings = settings
 
@@ -82,7 +98,8 @@ class VirtualDisplayManager {
             throw VirtualDisplayError.settingsApplyFailed("Failed to apply settings")
         }
 
-        print("✅ Virtual display created: \(width)x\(height) @ \(refreshRate)Hz (ID: \(display.displayID))")
+        let modeDesc = hiDPI ? "\(width)x\(height) HiDPI (physical \(physW)x\(physH))" : "\(width)x\(height)"
+        print("✅ Virtual display created: \(modeDesc) @ \(refreshRate)Hz (ID: \(display.displayID))")
     }
 
     /// Clone the main display configuration

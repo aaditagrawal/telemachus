@@ -379,7 +379,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Setup server
             streamingServer = StreamingServer(port: settings.port)
-            streamingServer?.setDisplaySize(width: size.width, height: size.height, rotation: settings.rotation)
+            // Use physical pixel dimensions from the live display (accounts for HiDPI 2x scaling)
+            let physWidth = screenCapture?.displayWidth ?? size.width
+            let physHeight = screenCapture?.displayHeight ?? size.height
+            streamingServer?.setDisplaySize(width: physWidth, height: physHeight, rotation: settings.rotation)
             streamingServer?.onClientConnected = { [weak self] in
                 guard let self = self else { return }
                 Task { @MainActor in

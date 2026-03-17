@@ -209,6 +209,23 @@ struct SettingsView: View {
                                     }
                                 }
 
+                                // HiDPI (Retina)
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("HiDPI (Retina)")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Text("Renders at 2× resolution for sharper text. Increases bandwidth.")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary.opacity(0.7))
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $settings.hiDPI)
+                                        .toggleStyle(.switch)
+                                        .controlSize(.mini)
+                                        .disabled(settings.isRunning)
+                                }
+
                                 // Rotation
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Rotation")
