@@ -10,6 +10,10 @@ class StreamingServer {
     // Touch callback: (x1, y1, action, pointerCount, x2, y2)
     var onTouchEvent: ((Float, Float, Int, Int, Float, Float) -> Void)?
     var onStats: ((Double, Double) -> Void)?
+    // Whether host wants to receive touch events from client. Ping/pong is
+    // handled regardless. When false, incoming touch frames are dropped
+    // immediately without parsing or dispatching to main queue.
+    var touchEnabled: Bool = true
 
     private let frameQueue = DispatchQueue(label: "frameQueue", qos: .userInteractive)
     private let receiveQueue = DispatchQueue(label: "receiveQueue", qos: .userInteractive)
@@ -132,7 +136,7 @@ class StreamingServer {
             return
         }
         isReceiving = true
-        debugLog("Starting touch receive loop...")
+        debugLog("Starting input receive loop... (touch=\(touchEnabled ? "on" : "off"))")
 
         // Use loop-based pattern instead of recursion to prevent stack overflow
         receiveQueue.async { [weak self] in
@@ -160,7 +164,14 @@ class StreamingServer {
                 let msgType = data[0]
 
                 if msgType == 2 && data.count >= 2 {
-                    // Touch event
+                    // Touch event — drop early if host has touch disabled,
+                    // skipping parsing and main-queue dispatch entirely.
+                    if !self.touchEnabled {
+                        self.receiveQueue.async {
+                            self.touchReceiveLoop()
+                        }
+                        return
+                    }
                     let pointerCount = Int(data[1])
                     let expectedSize = 2 + pointerCount * 8 + 4
 

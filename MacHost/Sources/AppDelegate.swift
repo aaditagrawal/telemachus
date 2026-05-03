@@ -122,6 +122,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.streamingServer?.updateRotation(rotation)
             }
             .store(in: &cancellables)
+
+        // Observer cho touch enable/disable - propagate to streaming server so
+        // incoming touch frames from the client are dropped early when off.
+        settings.$touchEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                self?.streamingServer?.touchEnabled = enabled
+            }
+            .store(in: &cancellables)
     }
 
     func setupMenuBar() {
@@ -462,6 +471,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Setup server
             streamingServer = StreamingServer(port: settings.port)
+            streamingServer?.touchEnabled = settings.touchEnabled
             // Use physical pixel dimensions from the live display (accounts for HiDPI 2x scaling)
             let physWidth = screenCapture?.displayWidth ?? size.width
             let physHeight = screenCapture?.displayHeight ?? size.height
