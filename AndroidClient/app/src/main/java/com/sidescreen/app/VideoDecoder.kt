@@ -29,6 +29,14 @@ class VideoDecoder(
     private var inputFrameCount = 0L
     private var outputFrameCount = 0L
 
+    // Decoder pipeline latency (input enqueue -> output buffer available),
+    // accumulated over ~60 frames then logged. High values indicate the codec
+    // is queuing frames internally (compose/present can't keep up downstream),
+    // which surfaces to the user as input lag on the captured display.
+    private var latencySumNs: Long = 0
+    private var latencySamples: Int = 0
+    private var latencyMaxNs: Long = 0
+
     private val frameTimes = ArrayDeque<Long>(120)
 
     private val displayRefreshRate = display?.refreshRate ?: 60f
@@ -316,8 +324,30 @@ class VideoDecoder(
             if (outputFrameCount == 1L) {
                 diagLog("First output frame! size=${info.size}, flags=${info.flags}")
             }
+
+            // Decoder latency: time from queueInputBuffer (where we encoded
+            // System.nanoTime()/1000 as PTS) to now. Captures how long the
+            // frame spent inside the codec's input/reorder/output queues.
+            val nowNs = System.nanoTime()
+            val latencyNs = nowNs - info.presentationTimeUs * 1000L
+            if (latencyNs in 0..2_000_000_000L) {
+                latencySumNs += latencyNs
+                latencySamples++
+                if (latencyNs > latencyMaxNs) latencyMaxNs = latencyNs
+            }
+
             if (outputFrameCount % 60L == 0L) {
-                diagLog("Output #$outputFrameCount rendered")
+                val avgMs = if (latencySamples > 0) latencySumNs / latencySamples / 1_000_000.0 else 0.0
+                val maxMs = latencyMaxNs / 1_000_000.0
+                val inBufs = availableInputBuffers.size
+                diagLog(
+                    "Output #$outputFrameCount: decoder latency avg=${"%.1f".format(avgMs)}ms " +
+                        "max=${"%.1f".format(maxMs)}ms over $latencySamples samples, " +
+                        "input bufs avail=$inBufs, dropped=$droppedFrames",
+                )
+                latencySumNs = 0
+                latencySamples = 0
+                latencyMaxNs = 0
             }
             codec.releaseOutputBuffer(index, true)
             trackFrameTiming(System.nanoTime())
