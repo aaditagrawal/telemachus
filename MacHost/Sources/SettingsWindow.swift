@@ -1037,7 +1037,7 @@ class DisplaySettings: ObservableObject {
 
     init() {
         self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "1920x1200"
-        self.refreshRate = defaults.object(forKey: keyPrefix + "refreshRate") as? Int ?? 120  // Default: highest FPS
+        self.refreshRate = defaults.object(forKey: keyPrefix + "refreshRate") as? Int ?? 60  // Default: 60 — balanced for most tablets. 120 may saturate high-res panel pipelines.
         self.hiDPI = defaults.bool(forKey: keyPrefix + "hiDPI")
         self.bitrate = defaults.object(forKey: keyPrefix + "bitrate") as? Int ?? 1000  // Default: 1000 Mbps
         self.quality = defaults.string(forKey: keyPrefix + "quality") ?? "ultralow"  // Default: fastest encoding
