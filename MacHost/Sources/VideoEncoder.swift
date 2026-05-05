@@ -1,8 +1,13 @@
 import Foundation
 import VideoToolbox
 import CoreMedia
+import os
 
 class VideoEncoder {
+    private struct EncoderState {
+        var pendingForceKeyframe = false
+    }
+
     private var compressionSession: VTCompressionSession?
     var onEncodedFrame: ((Data, UInt64, Bool) -> Void)?  // data, timestamp, isKeyframe
     private var width: Int
@@ -11,6 +16,7 @@ class VideoEncoder {
     private var quality: String = "medium"
     private var gamingBoost: Bool = false
     private var frameRate: Int = 60
+    private let stateLock = OSAllocatedUnfairLock(initialState: EncoderState())
     init(width: Int, height: Int, bitrateMbps: Int = 20, quality: String = "ultralow", gamingBoost: Bool = false, frameRate: Int = 60) {
         self.width = width
         self.height = height
@@ -112,6 +118,13 @@ class VideoEncoder {
         debugLog("VideoToolbox encoder configured (H.265, \(bitrateMbps)Mbps, \(frameRate)fps, \(mode))")
     }
 
+    /// Force the next encoded frame to be an IDR (sync) frame.
+    /// Used when a fresh client connects so its decoder can start immediately
+    /// instead of waiting up to one full GOP for the next scheduled keyframe.
+    func requestKeyframe() {
+        stateLock.withLock { $0.pendingForceKeyframe = true }
+    }
+
     func encode(pixelBuffer: CVPixelBuffer, presentationTimeStamp: CMTime) {
         guard let session = compressionSession else { return }
 
@@ -122,12 +135,21 @@ class VideoEncoder {
         let refconValue = UnsafeMutableRawPointer.allocate(byteCount: 8, alignment: 8)
         refconValue.storeBytes(of: captureNanos, as: UInt64.self)
 
+        let shouldForceKeyframe = stateLock.withLock { state -> Bool in
+            guard state.pendingForceKeyframe else { return false }
+            state.pendingForceKeyframe = false
+            return true
+        }
+        let frameProperties: CFDictionary? = shouldForceKeyframe
+            ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
+            : nil
+
         VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTimeStamp,
             duration: duration,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             sourceFrameRefcon: refconValue,
             infoFlagsOut: nil
         )

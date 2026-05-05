@@ -28,6 +28,7 @@ class StreamingServer {
     private var isReceiving = false
     private var isStopped = false
     private var connectionReady = false
+    private var waitingForSyncFrame = false
 
     init(port: UInt16) {
         self.port = port
@@ -78,6 +79,7 @@ class StreamingServer {
         }
 
         connectionReady = false
+        waitingForSyncFrame = true
         connection = newConnection
         droppedFrames = 0
 
@@ -212,7 +214,17 @@ class StreamingServer {
     func sendFrame(_ data: Data, timestamp: UInt64, isKeyframe: Bool = false) {
         guard let connection = connection, !isStopped, connectionReady else { return }
 
-        // With all-intra encoding, every frame is independently decodable.
+        // With short-GOP encoding, a fresh client must start on a keyframe —
+        // sending P-frames before the first IDR would feed garbage to its decoder.
+        if waitingForSyncFrame {
+            guard isKeyframe else {
+                droppedFrames += 1
+                return
+            }
+            waitingForSyncFrame = false
+            debugLog("First keyframe sent to new client")
+        }
+
         // No frame-age dropping or backpressure — send everything immediately.
         // The encode queue depth limit (2 pending) in ScreenCapture handles flow control.
         frameQueue.async { [weak self] in

@@ -39,6 +39,11 @@ class ScreenCapture {
         var fallbackActive = false
     }
 
+    private struct KeyframeRequestState {
+        var pendingEncoderCreationRequest = false
+    }
+    private let keyframeRequestLock = OSAllocatedUnfairLock(initialState: KeyframeRequestState())
+
     // Main-thread-only state
     private var frameMonitorTimer: DispatchSourceTimer?
     private var restartAttempted = false
@@ -60,6 +65,36 @@ class ScreenCapture {
 
     /// Callback when capture method changes (e.g. SCStream → CGDisplayStream fallback)
     var onCaptureMethodChanged: ((String) -> Void)?
+
+    /// Force the encoder to emit an IDR keyframe on the next frame.
+    /// If the encoder hasn't been created yet (request arrived before
+    /// startStreaming), the request is stored and applied at encoder init.
+    func requestKeyframe() {
+        if let encoder {
+            encoder.requestKeyframe()
+            return
+        }
+        keyframeRequestLock.withLock { $0.pendingEncoderCreationRequest = true }
+    }
+
+    /// Force a keyframe for the next captured frame, AND immediately re-encode
+    /// the last cached frame as a forced keyframe if the display is currently
+    /// idle. Without this, a client connecting during a static screen would
+    /// wait up to one full GOP duration before its decoder could start.
+    func requestKeyframeOrReplayCachedFrame() {
+        requestKeyframe()
+
+        guard let encoder, let cached = lastPixelBuffer else { return }
+
+        let pts = CMTime(
+            value: CMTimeValue(DispatchTime.now().uptimeNanoseconds / 1000),
+            timescale: 1_000_000
+        )
+
+        encodeQueue?.async {
+            encoder.encode(pixelBuffer: cached, presentationTimeStamp: pts)
+        }
+    }
 
     var displayWidth: Int {
         guard let id = virtualDisplayID else { return display?.width ?? 0 }
@@ -267,6 +302,16 @@ class ScreenCapture {
         encoder = VideoEncoder(width: width, height: height, bitrateMbps: bitrateMbps, quality: quality, gamingBoost: gamingBoost, frameRate: frameRate)
         encoder?.onEncodedFrame = { [weak server] data, timestamp, isKeyframe in
             server?.sendFrame(data, timestamp: timestamp, isKeyframe: isKeyframe)
+        }
+
+        // Apply any keyframe request that arrived before the encoder existed
+        let shouldForceInitialKeyframe = keyframeRequestLock.withLock { state -> Bool in
+            guard state.pendingEncoderCreationRequest else { return false }
+            state.pendingEncoderCreationRequest = false
+            return true
+        }
+        if shouldForceInitialKeyframe {
+            encoder?.requestKeyframe()
         }
 
         // Reset frame monitor state
