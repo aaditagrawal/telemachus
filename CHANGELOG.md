@@ -17,16 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-<a id="0.6.9"></a>
-## [0.6.9] - 2026-05-02
+<a id="0.7.0"></a>
+## [0.7.0] - 2026-05-05
 
-User-experience improvements — recovery from stale screen-recording permission and quicker access to display arrangement.
+User-experience improvements (permission recovery, display arrangement) and pipeline performance work to reduce input lag on high-resolution tablets.
 
 ### Fixed
 - **Stuck Screen Recording permission after reinstall** (#8): when macOS holds onto a stale TCC entry from a previous SideScreen install, `CGRequestScreenCaptureAccess()` no-ops silently and the user is locked out. The Status section now detects this state (preflight returns false despite a previous successful grant), surfaces a "Permission stuck" banner, and offers a one-click "Reset Permission" button that runs `tccutil reset ScreenCapture com.sidescreen.app`. If the spawn fails, a fallback banner shows the exact command with a Copy button.
+- **Input lag on dynamic content / high-res tablets** (#13): the encoder previously used all-intra (every frame a keyframe), producing 3-5x more data per frame than necessary. This saturated tablet decode/compose pipelines at high panel resolutions and starved Mac WindowServer rendering when capturing fast-changing content. Switched to short-GOP IPP encoding (1 keyframe per second, P-frames in between), which keeps frame-loss recovery within 1 second over reliable USB-C TCP while dramatically lowering per-frame work end-to-end.
+- **Touch parsing wasted CPU when touch was disabled**: incoming touch frames from the client were parsed and dispatched to the main queue even when host-side touch control was off; only the `guard` in the handler discarded them. Touch frames now drop early without parsing or dispatch when `touchEnabled` is off; ping/pong continues unaffected.
+- **Slow first frame after client connects on idle screen**: with short-GOP encoding, a client connecting during a static screen would wait up to a full second for the next scheduled keyframe before its decoder could start. The host now forces an IDR keyframe the moment a client appears, replays the last cached pixel buffer if capture is currently idle, and drops orphan P-frames at the streaming server until that first keyframe is sent — so a fresh decoder always starts on a sync frame. (Cherry-picked from #15 — thanks to @luisdavim for the contribution and @busybox11 for testing.)
+
+### Changed
+- **Default refresh rate is now 60 Hz** for new installs (was 120 Hz). 120 fps stream on a 120 Hz tablet leaves zero VSync headroom — any pipeline jitter immediately queues frames. 60 fps gives 2:1 headroom on 120 Hz panels and a 16.7 ms budget on 60 Hz panels. Existing users keep their saved value; users can still opt back to 120 from settings.
+- **Display Configuration UI**: refresh-rate selector moved into its own section, full-width custom buttons replace the native segmented picker, and the resolution list height now adapts to whether "Show all" is on.
 
 ### Added
 - **"Arrange Displays…" shortcut** (#12) in the Display Configuration section. Opens System Settings → Displays directly on the arrangement pane.
+- **Decoder pipeline latency log** on the Android client. Every 60 output frames, DiagLog records average/max decoder input-to-output latency plus available input buffer count, so users reporting lag can attach a log that pinpoints whether the bottleneck is decoder queuing, compose/present, or upstream Mac.
 
 ---
 
