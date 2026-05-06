@@ -522,117 +522,7 @@ struct SettingsView: View {
                                     StatusRow(title: "Capture Method", status: settings.captureMethod, color: settings.captureMethod.contains("fallback") ? .orange : .green)
                                 }
 
-                                if settings.tccResetFallbackVisible {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "exclamationmark.octagon.fill")
-                                                .foregroundColor(.red)
-                                            Text("Couldn't auto-reset permission")
-                                                .font(.system(size: 12, weight: .medium))
-                                        }
-                                        Text("Run this command in Terminal, then quit and reopen SideScreen:")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                        let cmd = "tccutil reset ScreenCapture \(Bundle.main.bundleIdentifier ?? "com.sidescreen.app")"
-                                        Text(cmd)
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .padding(6)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .background(Color.black.opacity(0.08))
-                                            .cornerRadius(4)
-                                            .textSelection(.enabled)
-                                        HStack {
-                                            Button(action: {
-                                                let pb = NSPasteboard.general
-                                                pb.clearContents()
-                                                pb.setString(cmd, forType: .string)
-                                            }) {
-                                                HStack {
-                                                    Image(systemName: "doc.on.doc")
-                                                    Text("Copy")
-                                                }
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                            Button(action: {
-                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                                            }) {
-                                                HStack {
-                                                    Image(systemName: "gear")
-                                                    Text("Open Privacy Settings")
-                                                }
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                    .padding(10)
-                                    .background(Color.red.opacity(0.1))
-                                    .cornerRadius(8)
-                                } else if settings.isPermissionStale {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "arrow.clockwise.circle.fill")
-                                                .foregroundColor(.red)
-                                            Text("Permission stuck")
-                                                .font(.system(size: 12, weight: .medium))
-                                        }
-                                        Text("macOS still has an old SideScreen permission entry but isn't honoring it. This usually happens after reinstall. Resetting it lets you grant fresh permission.")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                        HStack {
-                                            Button(action: {
-                                                guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
-                                                let alert = NSAlert()
-                                                alert.messageText = "Reset SideScreen's screen recording permission?"
-                                                alert.informativeText = "You'll need to grant it again in System Settings afterwards. Continue?"
-                                                alert.alertStyle = .warning
-                                                alert.addButton(withTitle: "Reset Permission")
-                                                alert.addButton(withTitle: "Cancel")
-                                                guard alert.runModal() == .alertFirstButtonReturn else { return }
-                                                Task { @MainActor in
-                                                    let ok = await appDelegate.resetScreenRecordingPermission()
-                                                    if ok {
-                                                        settings.hasGrantedBefore = false
-                                                        settings.isPermissionStale = false
-                                                        settings.tccResetFallbackVisible = false
-                                                        let done = NSAlert()
-                                                        done.messageText = "Permission reset"
-                                                        done.informativeText = "Click 'Open Privacy Settings' and re-add SideScreen to Screen Recording, then start the server again."
-                                                        done.addButton(withTitle: "Open Privacy Settings")
-                                                        done.addButton(withTitle: "Later")
-                                                        if done.runModal() == .alertFirstButtonReturn {
-                                                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                                                        }
-                                                        await appDelegate.checkPermissions()
-                                                    } else {
-                                                        settings.tccResetFallbackVisible = true
-                                                    }
-                                                }
-                                            }) {
-                                                HStack {
-                                                    Image(systemName: "arrow.counterclockwise")
-                                                    Text("Reset Permission")
-                                                }
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .controlSize(.small)
-                                            Button(action: {
-                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                                            }) {
-                                                HStack {
-                                                    Image(systemName: "gear")
-                                                    Text("Open Privacy Settings")
-                                                }
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                    .padding(10)
-                                    .background(Color.red.opacity(0.1))
-                                    .cornerRadius(8)
-                                } else if !settings.hasScreenRecordingPermission {
+                                if !settings.hasScreenRecordingPermission {
                                     VStack(alignment: .leading, spacing: 8) {
                                         HStack(spacing: 6) {
                                             Image(systemName: "exclamationmark.triangle.fill")
@@ -1017,17 +907,12 @@ class DisplaySettings: ObservableObject {
     @Published var touchEnabled: Bool {
         didSet { save("touchEnabled", touchEnabled) }
     }
-    @Published var hasGrantedBefore: Bool {
-        didSet { save("hasGrantedBefore", hasGrantedBefore) }
-    }
 
     // Runtime state (not persisted)
     @Published var displayCreated = false
     @Published var clientConnected = false
     @Published var hasScreenRecordingPermission = false
     @Published var hasAccessibilityPermission = false
-    @Published var isPermissionStale = false
-    @Published var tccResetFallbackVisible = false
     @Published var isRunning = false
     @Published var currentFPS: Double = 0
     @Published var currentBitrate: Double = 0
@@ -1048,7 +933,6 @@ class DisplaySettings: ObservableObject {
         self.customWidth = defaults.object(forKey: keyPrefix + "customWidth") as? Int ?? 1920
         self.customHeight = defaults.object(forKey: keyPrefix + "customHeight") as? Int ?? 1200
         self.touchEnabled = defaults.object(forKey: keyPrefix + "touchEnabled") as? Bool ?? true
-        self.hasGrantedBefore = defaults.bool(forKey: keyPrefix + "hasGrantedBefore")
 
         print("Loaded settings: \(resolution) @ \(refreshRate)Hz, bitrate=\(bitrate), quality=\(quality)")
     }

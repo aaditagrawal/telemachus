@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="0.7.1"></a>
+## [0.7.1] - 2026-05-06
+
+Hotfix — Mac app was being quarantined as malware by macOS XProtect on install.
+
+### Fixed
+- **Mac app flagged as virus and auto-moved to Trash on 0.7.0**: the new "Reset Permission" helper from #8 spawned `tccutil reset ScreenCapture <bundle-id>` from inside the app. This is the exact pattern XProtect's YARA rules use to detect TCC-bypass malware (Atomic Stealer / Cthulhu Stealer family). Combined with the existing ad-hoc signature and `disable-library-validation` / `allow-unsigned-executable-memory` entitlements, the binary scored high enough to be quarantined automatically. The auto-reset feature has been removed; stale-TCC handling is back to 0.6.8 behavior — users who hit it after a reinstall need to remove the SideScreen entry manually under System Settings → Privacy & Security → Screen Recording. All other 0.7.0 improvements (short-GOP encoding, instant decode handshake, default 60 Hz, touch parsing gate, Arrange Displays shortcut, decoder latency log) are preserved.
+
+---
+
 <a id="0.7.0"></a>
 ## [0.7.0] - 2026-05-05
 

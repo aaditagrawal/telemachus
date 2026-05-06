@@ -177,11 +177,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasScreenCapture = CGPreflightScreenCaptureAccess()
         await MainActor.run {
             settings.hasScreenRecordingPermission = hasScreenCapture
-            if hasScreenCapture {
-                settings.hasGrantedBefore = true
-                settings.isPermissionStale = false
-                settings.tccResetFallbackVisible = false
-            }
         }
         if hasScreenCapture {
             debugLog("Screen recording permission granted (CGPreflight)")
@@ -198,27 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             debugLog("Screen recording permission not granted yet")
-            // Prompt user to grant permission. If macOS still has a stale TCC
-            // entry from a previous install, this call no-ops silently — we
-            // detect that case by re-checking after a short delay.
             CGRequestScreenCaptureAccess()
-
-            try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
-
-            let recheck = CGPreflightScreenCaptureAccess()
-            await MainActor.run {
-                settings.hasScreenRecordingPermission = recheck
-                if recheck {
-                    settings.hasGrantedBefore = true
-                    settings.isPermissionStale = false
-                    settings.tccResetFallbackVisible = false
-                } else if settings.hasGrantedBefore {
-                    settings.isPermissionStale = true
-                    debugLog("Stale TCC state detected (hasGrantedBefore=true but preflight=false after request)")
-                } else {
-                    settings.isPermissionStale = false
-                }
-            }
         }
 
         // Check Accessibility permission (required for touch/mouse injection)
@@ -247,54 +222,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !trusted {
             print("⚠️  User needs to grant Accessibility permission in System Settings")
         }
-    }
-
-    /// Run `tccutil reset ScreenCapture <bundle-id>` to clear a stale TCC entry.
-    /// Returns true on exit-code 0 within the timeout, false otherwise.
-    /// Safe to call from the main actor; spawns the process asynchronously.
-    func resetScreenRecordingPermission() async -> Bool {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.sidescreen.app"
-        debugLog("Attempting tccutil reset ScreenCapture \(bundleID)")
-
-        return await Task.detached(priority: .userInitiated) { () -> Bool in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-            process.arguments = ["reset", "ScreenCapture", bundleID]
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-            } catch {
-                debugLog("tccutil reset failed to spawn: \(error.localizedDescription)")
-                return false
-            }
-
-            // 5s timeout watchdog
-            let deadline = Date().addingTimeInterval(5)
-            while process.isRunning && Date() < deadline {
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            }
-
-            if process.isRunning {
-                process.terminate()
-                debugLog("tccutil reset timed out after 5s, terminated")
-                return false
-            }
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            if process.terminationStatus == 0 {
-                debugLog("tccutil reset succeeded")
-                return true
-            } else {
-                debugLog("tccutil reset failed (exit \(process.terminationStatus)): \(output)")
-                return false
-            }
-        }.value
     }
 
     /// Setup ADB reverse port forwarding for USB connection
