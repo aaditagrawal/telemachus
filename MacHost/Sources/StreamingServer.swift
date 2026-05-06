@@ -26,6 +26,7 @@ class StreamingServer {
     // Touch callback: (x1, y1, action, pointerCount, x2, y2)
     var onTouchEvent: ((Float, Float, Int, Int, Float, Float) -> Void)?
     var onStats: ((Double, Double) -> Void)?
+    var onKeyframeRequested: ((Bool) -> Void)?
     // Whether host wants to receive touch events from client. Ping/pong is
     // handled regardless. When false, incoming touch frames are dropped
     // immediately without parsing or dispatching to main queue.
@@ -51,6 +52,7 @@ class StreamingServer {
     private var isStopped = false
     private var connectionReady = false
     private var waitingForSyncFrame = false
+    private var inputBuffer = Data()
 
     init(port: UInt16) {
         self.port = port
@@ -102,6 +104,7 @@ class StreamingServer {
 
         connectionReady = false
         waitingForSyncFrame = true
+        inputBuffer.removeAll(keepingCapacity: true)
         connection = newConnection
         droppedFrames = 0
 
@@ -261,63 +264,107 @@ class StreamingServer {
             return
         }
 
-        // New format: 1 type + 1 pointerCount + N*(4x+4y) + 4 action
-        // 1 finger: 14 bytes, 2 fingers: 22 bytes
-        connection.receive(minimumIncompleteLength: 2, maximumLength: 22) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, isComplete, error in
             guard let self = self, self.isReceiving, !self.isStopped else { return }
 
             if error != nil || isComplete {
                 self.isReceiving = false
+                self.inputBuffer.removeAll(keepingCapacity: true)
                 return
             }
 
-            if let data = data, data.count >= 1 {
-                let msgType = data[0]
-
-                if msgType == 2 && data.count >= 2 {
-                    // Touch event — drop early if host has touch disabled,
-                    // skipping parsing and main-queue dispatch entirely.
-                    if !self.touchEnabled {
-                        self.receiveQueue.async {
-                            self.touchReceiveLoop()
-                        }
-                        return
-                    }
-                    let pointerCount = Int(data[1])
-                    let expectedSize = 2 + pointerCount * 8 + 4
-
-                    if data.count >= expectedSize {
-                        let x1 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: Float.self) }
-                        let y1 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 6, as: Float.self) }
-
-                        var x2: Float = 0
-                        var y2: Float = 0
-                        if pointerCount >= 2 {
-                            x2 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 10, as: Float.self) }
-                            y2 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 14, as: Float.self) }
-                        }
-
-                        let actionOffset = 2 + pointerCount * 8
-                        let action = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: actionOffset, as: Int32.self) }
-
-                        DispatchQueue.main.async {
-                            self.onTouchEvent?(x1, y1, Int(action), pointerCount, x2, y2)
-                        }
-                    }
-                } else if msgType == 4 && data.count >= 9 {
-                    // Ping from client — echo back as pong (type=5) with client's timestamp
-                    let clientTimestamp = data.subdata(in: 1..<9)
-                    var pong = Data(capacity: 9)
-                    pong.append(5) // Type: Pong
-                    pong.append(clientTimestamp)
-                    connection.send(content: pong, completion: .contentProcessed { _ in })
-                }
+            if let data = data, !data.isEmpty {
+                self.inputBuffer.append(data)
+                self.processInputBuffer(connection: connection)
             }
 
             self.receiveQueue.async {
                 self.touchReceiveLoop()
             }
         }
+    }
+
+    private func processInputBuffer(connection: NWConnection) {
+        while let msgType = inputBuffer.first {
+            switch msgType {
+            case 2:
+                // Touch event: 1 type + 1 pointerCount + N*(4x+4y) + 4 action.
+                // 1 finger: 14 bytes, 2 fingers: 22 bytes.
+                guard inputBuffer.count >= 2 else { return }
+
+                let pointerCount = Int(inputByte(at: 1))
+                guard pointerCount == 1 || pointerCount == 2 else {
+                    debugLog("Invalid touch pointer count: \(pointerCount)")
+                    consumeInputBytes(1)
+                    continue
+                }
+
+                let expectedSize = 2 + pointerCount * 8 + 4
+                guard inputBuffer.count >= expectedSize else { return }
+
+                let message = Data(inputBuffer.prefix(expectedSize))
+                consumeInputBytes(expectedSize)
+
+                // Drop early if host has touch disabled, after consuming exactly
+                // this touch frame so coalesced ping/keyframe messages survive.
+                if touchEnabled {
+                    handleTouchMessage(message, pointerCount: pointerCount)
+                }
+
+            case 4:
+                // Ping from client: echo back as pong (type=5) with client's timestamp.
+                guard inputBuffer.count >= 9 else { return }
+
+                let clientTimestamp = Data(inputBuffer.dropFirst().prefix(8))
+                consumeInputBytes(9)
+
+                var pong = Data(capacity: 9)
+                pong.append(5) // Type: Pong
+                pong.append(clientTimestamp)
+                connection.send(content: pong, completion: .contentProcessed { _ in })
+
+            case 7:
+                // Keyframe request from Android decoder. The client sends a
+                // two-byte message: type + flags.
+                guard inputBuffer.count >= 2 else { return }
+
+                let flags = inputByte(at: 1)
+                consumeInputBytes(2)
+                onKeyframeRequested?((flags & 1) != 0)
+
+            default:
+                debugLog("Unknown client input type: \(msgType)")
+                consumeInputBytes(1)
+            }
+        }
+    }
+
+    private func handleTouchMessage(_ data: Data, pointerCount: Int) {
+        let x1 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: Float.self) }
+        let y1 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 6, as: Float.self) }
+
+        var x2: Float = 0
+        var y2: Float = 0
+        if pointerCount >= 2 {
+            x2 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 10, as: Float.self) }
+            y2 = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 14, as: Float.self) }
+        }
+
+        let actionOffset = 2 + pointerCount * 8
+        let action = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: actionOffset, as: Int32.self) }
+
+        DispatchQueue.main.async {
+            self.onTouchEvent?(x1, y1, Int(action), pointerCount, x2, y2)
+        }
+    }
+
+    private func inputByte(at offset: Int) -> UInt8 {
+        inputBuffer[inputBuffer.index(inputBuffer.startIndex, offsetBy: offset)]
+    }
+
+    private func consumeInputBytes(_ count: Int) {
+        let endIndex = inputBuffer.index(inputBuffer.startIndex, offsetBy: count)
+        inputBuffer.removeSubrange(inputBuffer.startIndex..<endIndex)
     }
 
     func sendFrame(_ data: Data, timestamp: UInt64, isKeyframe: Bool = false) {
@@ -339,10 +386,13 @@ class StreamingServer {
         frameQueue.async { [weak self] in
             guard let self = self else { return }
 
-            var packet = Data(capacity: data.count + 5)
-            packet.append(0) // Type: Video frame
+            var packet = Data(capacity: data.count + 14)
+            packet.append(6) // Type: Video frame with metadata
             var frameSize = Int32(data.count).bigEndian
             withUnsafeBytes(of: &frameSize) { packet.append(contentsOf: $0) }
+            packet.append(isKeyframe ? 1 : 0)
+            var captureTimestamp = timestamp.bigEndian
+            withUnsafeBytes(of: &captureTimestamp) { packet.append(contentsOf: $0) }
             packet.append(data)
 
             connection.send(content: packet, completion: .contentProcessed { error in

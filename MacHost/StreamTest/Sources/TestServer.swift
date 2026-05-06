@@ -100,10 +100,13 @@ class TestServer {
                 return
             }
 
-            var packet = Data(capacity: data.count + 5)
-            packet.append(0)  // type = video frame
+            var packet = Data(capacity: data.count + 14)
+            packet.append(6)  // type = video frame with metadata
             var frameSize = Int32(data.count).bigEndian
             withUnsafeBytes(of: &frameSize) { packet.append(contentsOf: $0) }
+            packet.append(isKeyframe ? 1 : 0)
+            var timestamp = DispatchTime.now().uptimeNanoseconds.bigEndian
+            withUnsafeBytes(of: &timestamp) { packet.append(contentsOf: $0) }
             packet.append(data)
 
             self.canSendNext = false
