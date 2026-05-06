@@ -25,6 +25,11 @@ Hotfix — Mac app was being quarantined as malware by macOS XProtect on install
 ### Fixed
 - **Mac app flagged as virus and auto-moved to Trash on 0.7.0**: the new "Reset Permission" helper from #8 spawned `tccutil reset ScreenCapture <bundle-id>` from inside the app. This is the exact pattern XProtect's YARA rules use to detect TCC-bypass malware (Atomic Stealer / Cthulhu Stealer family). Combined with the existing ad-hoc signature and `disable-library-validation` / `allow-unsigned-executable-memory` entitlements, the binary scored high enough to be quarantined automatically. The auto-reset feature has been removed; stale-TCC handling is back to 0.6.8 behavior — users who hit it after a reinstall need to remove the SideScreen entry manually under System Settings → Privacy & Security → Screen Recording. All other 0.7.0 improvements (short-GOP encoding, instant decode handshake, default 60 Hz, touch parsing gate, Arrange Displays shortcut, decoder latency log) are preserved.
 
+### Installation
+- **macOS**: Open `SideScreen-0.7.1-mac-universal.dmg`, drag SideScreen to Applications. If Gatekeeper says "damaged" or "cannot be opened": `sudo xattr -cr /Applications/SideScreen.app`
+- **Android**: Install `SideScreen-0.7.1-android.apk` (enable "Unknown sources" if needed)
+- **If you installed 0.7.0 and the app was moved to Trash by macOS**: empty Trash first, then download 0.7.1 fresh — the 0.7.0 binary was rejected by XProtect, redownloading the same file won't help. After installing 0.7.1, run the `xattr -cr` command above.
+
 ---
 
 <a id="0.7.0"></a>
