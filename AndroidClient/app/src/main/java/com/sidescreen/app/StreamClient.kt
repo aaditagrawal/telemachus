@@ -268,9 +268,13 @@ class StreamClient(
                     val type = input.readByte()
 
                     when (type.toInt()) {
-                        MESSAGE_VIDEO_FRAME -> receiveVideoFrame(input, hasMetadata = false)
+                        MESSAGE_VIDEO_FRAME -> {
+                            receiveVideoFrame(input, hasMetadata = false)
+                        }
 
-                        MESSAGE_VIDEO_FRAME_WITH_METADATA -> receiveVideoFrame(input, hasMetadata = true)
+                        MESSAGE_VIDEO_FRAME_WITH_METADATA -> {
+                            receiveVideoFrame(input, hasMetadata = true)
+                        }
 
                         1 -> { // Display size + rotation
                             val width = input.readInt()

@@ -46,6 +46,7 @@ class VideoDecoder(
     private var currentHeight = initialHeight
 
     @Volatile private var isRunning = false
+
     @Volatile private var needsKeyframe = true
 
     private var lastKeyframeRequestNs = 0L
@@ -297,7 +298,8 @@ class VideoDecoder(
         inputFrameCount++
         if (inputFrameCount == 1L) {
             val header =
-                frameData.take(minOf(16, frameSize))
+                frameData
+                    .take(minOf(16, frameSize))
                     .joinToString(" ") { String.format("%02x", it) }
             diagLog(
                 "First frame: size=$frameSize, header=[$header], " +
