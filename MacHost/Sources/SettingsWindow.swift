@@ -4,10 +4,11 @@ import SwiftUI
 // MARK: - Frosted GroupBox Component
 
 @available(macOS 14.0, *)
-struct FrostedGroupBox<Content: View>: View {
+struct FrostedGroupBox<Content: View, Trailing: View>: View {
     let title: String
     var icon: String?
     @ViewBuilder let content: Content
+    @ViewBuilder let trailing: Trailing
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -19,6 +20,8 @@ struct FrostedGroupBox<Content: View>: View {
                 }
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                trailing
             }
             content
         }
@@ -32,6 +35,16 @@ struct FrostedGroupBox<Content: View>: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
+    }
+}
+
+@available(macOS 14.0, *)
+extension FrostedGroupBox where Trailing == EmptyView {
+    init(title: String, icon: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content()
+        self.trailing = EmptyView()
     }
 }
 
@@ -128,6 +141,34 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
+                .background(.ultraThinMaterial)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: 1)
+
+                // Connection mode picker — pinned, NOT scrollable.
+                HStack(spacing: 6) {
+                    ForEach(ConnectionMode.allCases, id: \.self) { mode in
+                        Button(action: { settings.connectionMode = mode }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: mode == .usb ? "cable.connector" : "wifi")
+                                Text(mode == .usb ? "USB" : "Wireless")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(settings.connectionMode == mode ? Color.accentColor : Color.clear)
+                            .foregroundColor(settings.connectionMode == mode ? .white : .primary)
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(4)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
                 .background(.ultraThinMaterial)
 
                 Rectangle()
@@ -349,7 +390,7 @@ struct SettingsView: View {
                             }
                         }
 
-                        // Network Settings
+                        // Network Settings (port — applies to both modes; listener binds on it)
                         FrostedGroupBox(title: "Network Settings", icon: "network") {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
@@ -367,12 +408,22 @@ struct SettingsView: View {
                                     Text("Stop server to change port")
                                         .font(.system(size: 10))
                                         .foregroundColor(.orange)
-                                } else if settings.port != 8888 {
-                                    Text("Enter this port in the Android client app")
+                                } else if settings.connectionMode == .wireless {
+                                    Text("Changing the port invalidates existing pairings — re-scan the QR on each tablet.")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                } else if settings.port != 54321 {
+                                    Text("Custom port set — Android client must use the same port.")
                                         .font(.system(size: 10))
                                         .foregroundColor(.secondary)
                                 }
                             }
+                        }
+
+                        // Wireless-mode-only: QR + Paired Devices.
+                        if settings.connectionMode == .wireless {
+                            WirelessSection(settings: settings,
+                                            pairedDeviceStore: (NSApp.delegate as? AppDelegate)?.pairedDeviceStore ?? PairedDeviceStore())
                         }
 
                         // Gaming Boost
@@ -510,16 +561,64 @@ struct SettingsView: View {
                         // Status
                         FrostedGroupBox(title: "Status", icon: "checkmark.circle") {
                             VStack(alignment: .leading, spacing: 12) {
-                                StatusRow(title: "Virtual Display", status: settings.displayCreated ? "Active" : "Inactive", color: settings.displayCreated ? .green : .secondary)
-                                StatusRow(title: "Client Connected", status: settings.clientConnected ? "Yes" : "No", color: settings.clientConnected ? .green : .secondary)
+                                StatusRow(title: "Virtual Display",
+                                          status: settings.displayCreated ? "Active" : "Inactive",
+                                          color: settings.displayCreated ? .green : .secondary,
+                                          hint: "The macOS virtual display we render into. Created when you click Start; the tablet streams its pixels.")
+                                StatusRow(title: "Client Connected",
+                                          status: settings.clientConnected ? "Yes" : "No",
+                                          color: settings.clientConnected ? .green : .secondary,
+                                          hint: "Whether the Android client app currently has an active stream session.")
                                 StatusRow(
                                     title: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 ? "Screen & System Audio" : "Screen Recording",
                                     status: settings.hasScreenRecordingPermission ? "Granted" : "Required",
-                                    color: settings.hasScreenRecordingPermission ? .green : .red
+                                    color: settings.hasScreenRecordingPermission ? .green : .red,
+                                    hint: "macOS privacy permission required to capture the virtual display. Grant in System Settings → Privacy & Security → Screen Recording."
                                 )
-                                StatusRow(title: "Accessibility", status: settings.hasAccessibilityPermission ? "Granted" : "Optional", color: settings.hasAccessibilityPermission ? .green : .orange)
+                                StatusRow(title: "Accessibility",
+                                          status: settings.hasAccessibilityPermission ? "Granted" : "Optional",
+                                          color: settings.hasAccessibilityPermission ? .green : .orange,
+                                          hint: "Optional permission. Required only if you want touch/tap input from the tablet to control the Mac. Streaming works without it.")
                                 if settings.isRunning {
-                                    StatusRow(title: "Capture Method", status: settings.captureMethod, color: settings.captureMethod.contains("fallback") ? .orange : .green)
+                                    StatusRow(title: "Capture Method",
+                                              status: settings.captureMethod,
+                                              color: settings.captureMethod.contains("fallback") ? .orange : .green,
+                                              hint: "Which macOS API is currently capturing the virtual display. SCStream is the modern path; CGDisplayStream fallback activates if SCStream fails (e.g. on certain virtual display configs).")
+                                }
+
+                                // Mode-aware contextual rows
+                                Divider().padding(.vertical, 4)
+                                if settings.connectionMode == .usb {
+                                    StatusRow(title: "ADB installed",
+                                              status: settings.adbInstalled ? "Installed" : "Missing",
+                                              color: settings.adbInstalled ? .green : .red,
+                                              hint: "USB mode tunnels the TCP stream through the cable using `adb reverse`. Requires the `adb` command on the Mac. Searched paths: Homebrew, /usr/local/bin, ~/Library/Android/sdk/platform-tools, and PATH (`which adb`).")
+                                    if !settings.adbInstalled {
+                                        Text("brew install android-platform-tools")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .padding(6)
+                                            .background(Color.black.opacity(0.08))
+                                            .cornerRadius(4)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .textSelection(.enabled)
+                                    }
+                                    StatusRow(title: "ADB reverse",
+                                              status: settings.adbReverseConfigured ? "OK" : "Pending",
+                                              color: settings.adbReverseConfigured ? .green : .orange,
+                                              hint: "Whether `adb reverse tcp:\(settings.port) tcp:\(settings.port)` is currently configured. The Mac app sets this up automatically when you click Start. Goes green within ~2 seconds after the tablet is plugged in and authorized.")
+                                    StatusRow(title: "USB device",
+                                              status: settings.usbDeviceConnected ? "Detected" : "Not detected",
+                                              color: settings.usbDeviceConnected ? .green : .red,
+                                              hint: "An Android device authorized for ADB and visible to your Mac. Plug in via USB-C and tap Allow on the device's USB debugging prompt.")
+                                } else {
+                                    StatusRow(title: "WiFi",
+                                              status: settings.wifiConnected ? "Connected" : "Disconnected",
+                                              color: settings.wifiConnected ? .green : .red,
+                                              hint: "Whether the Mac currently has a working internet route. Wireless mode requires the Mac to be on a WiFi (or Ethernet) network — the same network the tablet is on.")
+                                    StatusRow(title: "Listening on",
+                                              status: settings.listeningAddress.map { "\($0):\(settings.port)" } ?? "—",
+                                              color: settings.listeningAddress != nil ? .green : .secondary,
+                                              hint: "The LAN address the tablet must reach. The QR code embeds this exact host:port — if it changes (e.g. you switch WiFi), re-scan the new QR on the tablet.")
                                 }
 
                                 if !settings.hasScreenRecordingPermission {
@@ -735,11 +834,33 @@ struct StatusRow: View {
     let title: String
     let status: String
     let color: Color
+    var hint: String? = nil
+    @State private var showHint = false
+    @State private var hovering = false
 
     var body: some View {
         HStack {
             Text(title)
                 .font(.system(size: 12))
+            if let hint = hint {
+                Button(action: { showHint.toggle() }) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11))
+                        .foregroundColor(hovering ? .accentColor : .secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .help(hint)
+                .popover(isPresented: $showHint, arrowEdge: .top) {
+                    Text(hint)
+                        .font(.system(size: 12))
+                        .padding(10)
+                        .frame(maxWidth: 320, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer()
             HStack(spacing: 6) {
                 Circle()
@@ -907,12 +1028,23 @@ class DisplaySettings: ObservableObject {
     @Published var touchEnabled: Bool {
         didSet { save("touchEnabled", touchEnabled) }
     }
+    @Published var connectionMode: ConnectionMode {
+        didSet { save("connectionMode", connectionMode.rawValue) }
+    }
 
     // Runtime state (not persisted)
     @Published var displayCreated = false
     @Published var clientConnected = false
+    /// Device name of the wireless client currently streaming (nil when none).
+    /// WirelessSection reads this to show a "Connected" badge on the matching row.
+    @Published var currentWirelessDevice: String? = nil
     @Published var hasScreenRecordingPermission = false
     @Published var hasAccessibilityPermission = false
+    @Published var adbInstalled = false
+    @Published var adbReverseConfigured = false
+    @Published var usbDeviceConnected = false
+    @Published var wifiConnected = false
+    @Published var listeningAddress: String? = nil
     @Published var isRunning = false
     @Published var currentFPS: Double = 0
     @Published var currentBitrate: Double = 0
@@ -927,12 +1059,16 @@ class DisplaySettings: ObservableObject {
         self.bitrate = defaults.object(forKey: keyPrefix + "bitrate") as? Int ?? 1000  // Default: 1000 Mbps
         self.quality = defaults.string(forKey: keyPrefix + "quality") ?? "ultralow"  // Default: fastest encoding
         self.gamingBoost = defaults.bool(forKey: keyPrefix + "gamingBoost")
-        self.port = UInt16(defaults.object(forKey: keyPrefix + "port") as? Int ?? 8888)
+        // Default port 54321 (was 8888 in <=0.7.1; 8888 collides with jupyter/splunk/HP printers).
+        // Existing users keep their saved value.
+        self.port = UInt16(defaults.object(forKey: keyPrefix + "port") as? Int ?? 54321)
         self.rotation = defaults.object(forKey: keyPrefix + "rotation") as? Int ?? 0
         self.showAllResolutions = defaults.bool(forKey: keyPrefix + "showAllResolutions")
         self.customWidth = defaults.object(forKey: keyPrefix + "customWidth") as? Int ?? 1920
         self.customHeight = defaults.object(forKey: keyPrefix + "customHeight") as? Int ?? 1200
         self.touchEnabled = defaults.object(forKey: keyPrefix + "touchEnabled") as? Bool ?? true
+        let modeRaw = defaults.string(forKey: keyPrefix + "connectionMode") ?? ConnectionMode.usb.rawValue
+        self.connectionMode = ConnectionMode(rawValue: modeRaw) ?? .usb
 
         print("Loaded settings: \(resolution) @ \(refreshRate)Hz, bitrate=\(bitrate), quality=\(quality)")
     }
@@ -1007,7 +1143,7 @@ class DisplaySettings: ObservableObject {
         bitrate = 1000  // Default: 1000 Mbps
         quality = "ultralow"  // Default: fastest encoding
         gamingBoost = false
-        port = 8888
+        port = 54321
         rotation = 0
         showAllResolutions = false
         customWidth = 1920
@@ -1112,3 +1248,170 @@ class ConstrainedWindow: NSWindow {
         return constrainedRect
     }
 }
+
+
+// MARK: - Wireless Section
+
+@available(macOS 14.0, *)
+struct WirelessSection: View {
+    @ObservedObject var settings: DisplaySettings
+    let pairedDeviceStore: PairedDeviceStore
+    @State private var qrImage: NSImage? = nil
+    @State private var pairedDevices: [PairedDevice] = []
+    @State private var showResetConfirm = false
+    /// Used to force the relative-time labels to recompute every tick even when
+    /// the underlying lastConnected timestamp hasn't changed (e.g. while a
+    /// device is disconnected and we still want "5 minutes ago" to count up).
+    @State private var nowTick: Date = Date()
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if !settings.isRunning {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Click Start at the top to begin listening, then scan the QR.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.12))
+                .cornerRadius(6)
+            }
+            FrostedGroupBox(title: "Pair Device", icon: "qrcode") {
+                VStack(spacing: 8) {
+                    if let qr = qrImage {
+                        Image(nsImage: qr)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 180, height: 180)
+                            .padding(8)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    } else {
+                        Text("Generating QR…").foregroundColor(.secondary)
+                    }
+                    Text("Scan this QR from Side Screen Android (Wireless tab)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(LANAddressResolver.primaryIPv4().map { "Listening: \($0):\(settings.port)" } ?? "WiFi disconnected — no LAN address")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            FrostedGroupBox(
+                title: "Paired Devices (\(pairedDevices.count))",
+                icon: "ipad.and.iphone",
+                content: {
+                if pairedDevices.isEmpty {
+                    Text("No devices paired yet.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 6) {
+                        ForEach(pairedDevices, id: \.name) { device in
+                            let isLive = settings.currentWirelessDevice == device.name
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.name).font(.system(size: 12, weight: .medium))
+                                    HStack(spacing: 4) {
+                                        Circle()
+                                            .fill(isLive ? Color.green : Color.secondary)
+                                            .frame(width: 6, height: 6)
+                                        Text(isLive ? "Connected" : relativeTimeString(from: device.lastConnected, to: nowTick))
+                                            .font(.system(size: 10))
+                                            .foregroundColor(isLive ? .green : .secondary)
+                                    }
+                                }
+                                Spacer()
+                                Button("Forget") {
+                                    pairedDeviceStore.forget(name: device.name)
+                                    refreshPaired()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(6)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+                Button("Reset Token (forget all)") {
+                    showResetConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .foregroundColor(.red)
+                .padding(.top, 6)
+            },
+            trailing: {
+                Button(action: {
+                    nowTick = Date()
+                    refreshPaired()
+                }) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh list and timestamps")
+            })
+        }
+        .onAppear {
+            refreshQR()
+            refreshPaired()
+            nowTick = Date()
+        }
+        .onChange(of: settings.port) { _, _ in refreshQR() }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { now in
+            nowTick = now
+            refreshPaired()
+        }
+        .alert("Reset Token?", isPresented: $showResetConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                _ = WirelessAuth.reset()
+                pairedDeviceStore.clear()
+                refreshQR()
+                refreshPaired()
+            }
+        } message: {
+            Text("This will disconnect all paired devices. They will need to scan the new QR to connect again.")
+        }
+    }
+
+    private func refreshQR() {
+        let token = WirelessAuth.loadOrCreate()
+        let host = LANAddressResolver.primaryIPv4() ?? "0.0.0.0"
+        let name = Host.current().localizedName ?? "Mac"
+        let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
+        qrImage = QRRenderer.render(url: url, size: 180)
+    }
+
+    private func refreshPaired() {
+        pairedDevices = pairedDeviceStore.all()
+    }
+
+    private func relativeTimeString(from past: Date, to now: Date) -> String {
+        let elapsed = max(0, now.timeIntervalSince(past))
+        if elapsed < 30 { return "just now" }
+        if elapsed < 60 { return "\(Int(elapsed)) seconds ago" }
+        if elapsed < 3600 {
+            let m = Int(elapsed / 60)
+            return "\(m) minute\(m == 1 ? "" : "s") ago"
+        }
+        if elapsed < 86400 {
+            let h = Int(elapsed / 3600)
+            return "\(h) hour\(h == 1 ? "" : "s") ago"
+        }
+        let d = Int(elapsed / 86400)
+        return "\(d) day\(d == 1 ? "" : "s") ago"
+    }
+}
+

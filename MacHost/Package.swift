@@ -21,6 +21,17 @@ let package = Package(
             ],
             swiftSettings: [
                 .unsafeFlags(["-Xcc", "-fmodule-map-file=Sources/module.modulemap"])
-            ])
+            ]),
+        .testTarget(
+            name: "SideScreenTests",
+            dependencies: ["SideScreen"],
+            path: "Tests/SideScreenTests",
+            cSettings: [
+                .unsafeFlags(["-I", "Sources"])
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-Xcc", "-fmodule-map-file=Sources/module.modulemap"])
+            ]
+        )
     ]
 )

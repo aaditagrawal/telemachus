@@ -1,6 +1,22 @@
 import Foundation
 import Network
 
+private extension NWEndpoint {
+    var isLoopback: Bool {
+        switch self {
+        case .hostPort(let host, _):
+            switch host {
+            case .ipv4(let v4): return v4.isLoopback
+            case .ipv6(let v6): return v6.isLoopback
+            case .name(let name, _): return name == "localhost"
+            @unknown default: return false
+            }
+        default:
+            return false
+        }
+    }
+}
+
 class StreamingServer {
     private let port: UInt16
     private var listener: NWListener?
@@ -14,6 +30,12 @@ class StreamingServer {
     // handled regardless. When false, incoming touch frames are dropped
     // immediately without parsing or dispatching to main queue.
     var touchEnabled: Bool = true
+
+    // Wireless auth: when non-nil, non-loopback connections must present this
+    // 32-byte token before being allowed to proceed. nil means wireless mode
+    // is inactive — non-loopback connections are rejected immediately.
+    var expectedAuthToken: Data?
+    var onWirelessClientPaired: ((String) -> Void)?
 
     private let frameQueue = DispatchQueue(label: "frameQueue", qos: .userInteractive)
     private let receiveQueue = DispatchQueue(label: "receiveQueue", qos: .userInteractive)
@@ -87,12 +109,7 @@ class StreamingServer {
             debugLog("Connection state: \(state)")
             switch state {
             case .ready:
-                debugLog("Client connected - sending display config first")
-                self?.sendDisplaySize()
-                self?.connectionReady = true
-                debugLog("Connection ready for frames")
-                self?.onClientConnected?()
-                self?.startReceivingTouch()
+                self?.onConnectionReady(newConnection)
             case .failed(let error):
                 debugLog("Connection failed: \(error)")
                 self?.onClientDisconnected?()
@@ -105,6 +122,98 @@ class StreamingServer {
         }
 
         connection?.start(queue: networkQueue)
+    }
+
+    private func onConnectionReady(_ conn: NWConnection) {
+        if conn.endpoint.isLoopback {
+            debugLog("Client connected via loopback (USB) — skipping auth")
+            beginExistingProtocol(on: conn)
+            return
+        }
+        guard let expected = expectedAuthToken else {
+            debugLog("Rejecting non-loopback client: wireless mode not active")
+            conn.cancel()
+            return
+        }
+        debugLog("Client connected via LAN — running auth handshake")
+        runAuthHandshake(connection: conn, expectedToken: expected)
+    }
+
+    private func beginExistingProtocol(on conn: NWConnection) {
+        debugLog("Client connected - sending display config first")
+        sendDisplaySize()
+        connectionReady = true
+        debugLog("Connection ready for frames")
+        onClientConnected?()
+        startReceivingTouch()
+    }
+
+    private func runAuthHandshake(connection conn: NWConnection, expectedToken: Data) {
+        // Read fixed prefix [magic 4][token 32][name_len 1] = 37 bytes.
+        conn.receive(minimumIncompleteLength: HandshakeCodec.fixedPrefixLen,
+                     maximumLength: HandshakeCodec.fixedPrefixLen) { [weak self] prefixData, _, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                debugLog("Auth read error: \(error)")
+                conn.cancel()
+                return
+            }
+            guard let prefix = prefixData, prefix.count == HandshakeCodec.fixedPrefixLen else {
+                self.sendAuthResponse(conn, status: .invalidMagic, thenClose: true)
+                return
+            }
+            let prefixBytes = Array(prefix)
+            guard Array(prefixBytes[0..<4]) == HandshakeCodec.requestMagic else {
+                self.sendAuthResponse(conn, status: .invalidMagic, thenClose: true)
+                return
+            }
+            let nameLen = Int(prefixBytes[36])
+            guard (1...64).contains(nameLen) else {
+                self.sendAuthResponse(conn, status: .invalidName, thenClose: true)
+                return
+            }
+            // Read variable name.
+            conn.receive(minimumIncompleteLength: nameLen, maximumLength: nameLen) { nameData, _, _, error in
+                if let error = error {
+                    debugLog("Auth name read error: \(error)")
+                    conn.cancel()
+                    return
+                }
+                guard let nameData = nameData, nameData.count == nameLen else {
+                    self.sendAuthResponse(conn, status: .invalidName, thenClose: true)
+                    return
+                }
+                let full = prefix + nameData
+                do {
+                    let parsed = try HandshakeCodec.parseRequest(full)
+                    if WirelessAuth.validate(parsed.token, expected: expectedToken) {
+                        debugLog("Wireless auth OK — device: \(parsed.deviceName)")
+                        self.sendAuthResponse(conn, status: .ok, thenClose: false)
+                        self.onWirelessClientPaired?(parsed.deviceName)
+                        self.beginExistingProtocol(on: conn)
+                    } else {
+                        debugLog("Wireless auth rejected: token mismatch")
+                        self.sendAuthResponse(conn, status: .invalidToken, thenClose: true)
+                    }
+                } catch HandshakeError.invalidMagic {
+                    self.sendAuthResponse(conn, status: .invalidMagic, thenClose: true)
+                } catch HandshakeError.invalidName {
+                    self.sendAuthResponse(conn, status: .invalidName, thenClose: true)
+                } catch {
+                    self.sendAuthResponse(conn, status: .invalidMagic, thenClose: true)
+                }
+            }
+        }
+    }
+
+    private func sendAuthResponse(_ conn: NWConnection, status: HandshakeStatus, thenClose: Bool) {
+        let bytes = HandshakeCodec.encodeResponse(status: status)
+        conn.send(content: bytes, completion: .contentProcessed { _ in
+            if thenClose {
+                debugLog("Auth rejected (\(status)), closing connection")
+                conn.cancel()
+            }
+        })
     }
 
     func setDisplaySize(width: Int, height: Int, rotation: Int = 0) {
