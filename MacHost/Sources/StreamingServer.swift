@@ -1,6 +1,17 @@
 import Foundation
 import Network
 
+private enum WireMessage {
+    static let legacyVideoFrame: UInt8 = 0
+    static let displayConfig: UInt8 = 1
+    static let touchEvent: UInt8 = 2
+    static let ping: UInt8 = 4
+    static let pong: UInt8 = 5
+    static let videoFrameWithMetadata: UInt8 = 6
+    static let keyframeRequest: UInt8 = 7
+    static let clientSupportsFrameMetadata: UInt8 = 8
+}
+
 private extension NWEndpoint {
     var isLoopback: Bool {
         switch self {
@@ -52,6 +63,8 @@ class StreamingServer {
     private var isStopped = false
     private var connectionReady = false
     private var waitingForSyncFrame = false
+    private var clientSupportsFrameMetadata = false
+    private var protocolStarted = false
     private var inputBuffer = Data()
 
     init(port: UInt16) {
@@ -103,6 +116,8 @@ class StreamingServer {
         }
 
         connectionReady = false
+        clientSupportsFrameMetadata = false
+        protocolStarted = false
         waitingForSyncFrame = true
         inputBuffer.removeAll(keepingCapacity: true)
         connection = newConnection
@@ -143,12 +158,26 @@ class StreamingServer {
     }
 
     private func beginExistingProtocol(on conn: NWConnection) {
+        startReceivingTouch()
+
+        // Give new clients a short chance to opt in before the first frame.
+        // Legacy clients send no capability message, so we continue shortly
+        // after this window with the old frame type.
+        networkQueue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self, weak conn] in
+            guard let self = self, let conn = conn else { return }
+            self.finishProtocolStartup(on: conn)
+        }
+    }
+
+    private func finishProtocolStartup(on conn: NWConnection) {
+        guard connection === conn, !isStopped, !protocolStarted else { return }
+
+        protocolStarted = true
         debugLog("Client connected - sending display config first")
         sendDisplaySize()
         connectionReady = true
-        debugLog("Connection ready for frames")
+        debugLog("Connection ready for frames (metadata=\(clientSupportsFrameMetadata ? "on" : "off"))")
         onClientConnected?()
-        startReceivingTouch()
     }
 
     private func runAuthHandshake(connection conn: NWConnection, expectedToken: Data) {
@@ -235,7 +264,7 @@ class StreamingServer {
         guard let connection = connection else { return }
 
         var data = Data()
-        data.append(1) // Type: Display size + rotation
+        data.append(WireMessage.displayConfig) // Type: Display size + rotation
         data.append(contentsOf: withUnsafeBytes(of: Int32(displayWidth).bigEndian) { Data($0) })
         data.append(contentsOf: withUnsafeBytes(of: Int32(displayHeight).bigEndian) { Data($0) })
         data.append(contentsOf: withUnsafeBytes(of: Int32(rotation).bigEndian) { Data($0) })
@@ -287,7 +316,7 @@ class StreamingServer {
     private func processInputBuffer(connection: NWConnection) {
         while let msgType = inputBuffer.first {
             switch msgType {
-            case 2:
+            case WireMessage.touchEvent:
                 // Touch event: 1 type + 1 pointerCount + N*(4x+4y) + 4 action.
                 // 1 finger: 14 bytes, 2 fingers: 22 bytes.
                 guard inputBuffer.count >= 2 else { return }
@@ -311,7 +340,7 @@ class StreamingServer {
                     handleTouchMessage(message, pointerCount: pointerCount)
                 }
 
-            case 4:
+            case WireMessage.ping:
                 // Ping from client: echo back as pong (type=5) with client's timestamp.
                 guard inputBuffer.count >= 9 else { return }
 
@@ -319,11 +348,11 @@ class StreamingServer {
                 consumeInputBytes(9)
 
                 var pong = Data(capacity: 9)
-                pong.append(5) // Type: Pong
+                pong.append(WireMessage.pong) // Type: Pong
                 pong.append(clientTimestamp)
                 connection.send(content: pong, completion: .contentProcessed { _ in })
 
-            case 7:
+            case WireMessage.keyframeRequest:
                 // Keyframe request from Android decoder. The client sends a
                 // two-byte message: type + flags.
                 guard inputBuffer.count >= 2 else { return }
@@ -331,6 +360,16 @@ class StreamingServer {
                 let flags = inputByte(at: 1)
                 consumeInputBytes(2)
                 onKeyframeRequested?((flags & 1) != 0)
+
+            case WireMessage.clientSupportsFrameMetadata:
+                // One-byte opt-in from newer clients. Keeping this payload-free
+                // lets older hosts safely ignore it without misaligning input.
+                consumeInputBytes(1)
+                if !clientSupportsFrameMetadata {
+                    clientSupportsFrameMetadata = true
+                    debugLog("Client supports video frame metadata")
+                }
+                finishProtocolStartup(on: connection)
 
             default:
                 debugLog("Unknown client input type: \(msgType)")
@@ -386,14 +425,27 @@ class StreamingServer {
         frameQueue.async { [weak self] in
             guard let self = self else { return }
 
-            var packet = Data(capacity: data.count + 14)
-            packet.append(6) // Type: Video frame with metadata
-            var frameSize = Int32(data.count).bigEndian
-            withUnsafeBytes(of: &frameSize) { packet.append(contentsOf: $0) }
-            packet.append(isKeyframe ? 1 : 0)
-            var captureTimestamp = timestamp.bigEndian
-            withUnsafeBytes(of: &captureTimestamp) { packet.append(contentsOf: $0) }
-            packet.append(data)
+            let packet: Data
+            if self.clientSupportsFrameMetadata {
+                var metadataPacket = Data(capacity: data.count + 14)
+                metadataPacket.append(WireMessage.videoFrameWithMetadata)
+                var frameSize = Int32(data.count).bigEndian
+                withUnsafeBytes(of: &frameSize) { metadataPacket.append(contentsOf: $0) }
+                metadataPacket.append(isKeyframe ? 1 : 0)
+                var captureTimestamp = timestamp.bigEndian
+                withUnsafeBytes(of: &captureTimestamp) { metadataPacket.append(contentsOf: $0) }
+                metadataPacket.append(data)
+                packet = metadataPacket
+            } else {
+                // Keep legacy frame type 0 for clients that do not advertise
+                // metadata support; remove after legacy clients age out.
+                var legacyPacket = Data(capacity: data.count + 5)
+                legacyPacket.append(WireMessage.legacyVideoFrame)
+                var frameSize = Int32(data.count).bigEndian
+                withUnsafeBytes(of: &frameSize) { legacyPacket.append(contentsOf: $0) }
+                legacyPacket.append(data)
+                packet = legacyPacket
+            }
 
             connection.send(content: packet, completion: .contentProcessed { error in
                 if error != nil {

@@ -113,6 +113,7 @@ class StreamClient(
                     }
                 inputStream = DataInputStream(java.io.BufferedInputStream(socket?.getInputStream(), 65536))
                 outputStream = java.io.DataOutputStream(socket?.getOutputStream())
+                advertiseFrameMetadataSupport()
                 isConnected = true
                 lastKeyframeReceivedNs = 0L
                 synchronized(keyframeRequestLock) {
@@ -237,6 +238,7 @@ class StreamClient(
                 socket = s
                 inputStream = DataInputStream(java.io.BufferedInputStream(s.getInputStream(), 65536))
                 outputStream = java.io.DataOutputStream(s.getOutputStream())
+                advertiseFrameMetadataSupport()
                 isConnected = true
                 diagLog("Wireless connected to $host:$port")
                 onConnectionStatus?.invoke(true)
@@ -256,6 +258,14 @@ class StreamClient(
                 }
                 throw WirelessConnectError.ProtocolError
             }
+        }
+    }
+
+    private fun advertiseFrameMetadataSupport() {
+        outputStream?.let { out ->
+            out.writeByte(MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA)
+            out.flush()
+            diagLog("Advertised frame metadata support")
         }
     }
 
@@ -534,6 +544,7 @@ class StreamClient(
         private const val MESSAGE_VIDEO_FRAME = 0
         private const val MESSAGE_VIDEO_FRAME_WITH_METADATA = 6
         private const val MESSAGE_KEYFRAME_REQUEST = 7
+        private const val MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA = 8
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 
