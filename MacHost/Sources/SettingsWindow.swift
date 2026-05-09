@@ -834,7 +834,7 @@ struct StatusRow: View {
     let title: String
     let status: String
     let color: Color
-    var hint: String? = nil
+    var hint: String?
     @State private var showHint = false
     @State private var hovering = false
 
@@ -1037,14 +1037,14 @@ class DisplaySettings: ObservableObject {
     @Published var clientConnected = false
     /// Device name of the wireless client currently streaming (nil when none).
     /// WirelessSection reads this to show a "Connected" badge on the matching row.
-    @Published var currentWirelessDevice: String? = nil
+    @Published var currentWirelessDevice: String?
     @Published var hasScreenRecordingPermission = false
     @Published var hasAccessibilityPermission = false
     @Published var adbInstalled = false
     @Published var adbReverseConfigured = false
     @Published var usbDeviceConnected = false
     @Published var wifiConnected = false
-    @Published var listeningAddress: String? = nil
+    @Published var listeningAddress: String?
     @Published var isRunning = false
     @Published var currentFPS: Double = 0
     @Published var currentBitrate: Double = 0
@@ -1249,14 +1249,13 @@ class ConstrainedWindow: NSWindow {
     }
 }
 
-
 // MARK: - Wireless Section
 
 @available(macOS 14.0, *)
 struct WirelessSection: View {
     @ObservedObject var settings: DisplaySettings
     let pairedDeviceStore: PairedDeviceStore
-    @State private var qrImage: NSImage? = nil
+    @State private var qrImage: NSImage?
     @State private var pairedDevices: [PairedDevice] = []
     @State private var showResetConfirm = false
     /// Used to force the relative-time labels to recompute every tick even when
@@ -1414,4 +1413,3 @@ struct WirelessSection: View {
         return "\(d) day\(d == 1 ? "" : "s") ago"
     }
 }
-

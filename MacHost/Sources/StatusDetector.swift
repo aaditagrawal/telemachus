@@ -68,14 +68,12 @@ enum StatusDetector {
         let candidatePaths = [
             "/opt/homebrew/bin/adb",
             "/usr/local/bin/adb",
-            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
+            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb"
         ]
-        for path in candidatePaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                cachedAdbPath = path
-                lastAdbCacheCheck = Date()
-                return path
-            }
+        for path in candidatePaths where FileManager.default.isExecutableFile(atPath: path) {
+            cachedAdbPath = path
+            lastAdbCacheCheck = Date()
+            return path
         }
         // Fallback: ask `which adb` (covers PATH-installed setups).
         let task = Process()
