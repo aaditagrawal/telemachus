@@ -39,6 +39,9 @@ import java.net.Socket
 private fun mainDiag(msg: String) = DiagLog.log("MA", msg)
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var wirelessController: WirelessTabController
+    private val pairedHostStorage by lazy { PairedHostStorage(this) }
+    private val cameraPerm by lazy { CameraPermissionManager(this) }
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: PreferencesManager
     private var videoDecoder: VideoDecoder? = null
@@ -97,6 +100,75 @@ class MainActivity : AppCompatActivity() {
         restoreOverlayPosition()
         restoreSettingsButtonPosition()
         startChecklistUpdates()
+        setupModeToggle()
+        setupWirelessController()
+    }
+
+    private fun setupModeToggle() {
+        // Restore previous mode and reflect in toggle.
+        val saved = prefs.connectionMode
+        binding.modeToggleGroup.check(if (saved == ConnectionMode.WIRELESS) R.id.modeWireless else R.id.modeUSB)
+        applyModeVisibility(saved)
+
+        binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val mode = if (checkedId == R.id.modeWireless) ConnectionMode.WIRELESS else ConnectionMode.USB
+            prefs.connectionMode = mode
+            applyModeVisibility(mode)
+            if (mode == ConnectionMode.WIRELESS) {
+                wirelessController.show()
+            }
+        }
+    }
+
+    private fun applyModeVisibility(mode: ConnectionMode) {
+        binding.usbModeContent.visibility = if (mode == ConnectionMode.USB) View.VISIBLE else View.GONE
+        binding.wirelessModeContent.visibility = if (mode == ConnectionMode.WIRELESS) View.VISIBLE else View.GONE
+    }
+
+    private fun setupWirelessController() {
+        wirelessController = WirelessTabController(
+            activity = this,
+            views = WirelessTabController.Views(
+                firstTime = binding.wirelessFirstTime,
+                connected = binding.wirelessConnected,
+                tokenMismatch = binding.wirelessTokenMismatch,
+                permDenied = binding.wirelessPermDenied,
+                scanButton = binding.wirelessScanButton,
+                rescanButton = binding.wirelessRescanButton,
+                disconnectButton = binding.wirelessDisconnectButton,
+                forgetButton = binding.wirelessForgetButton,
+                openSettingsButton = binding.wirelessOpenSettingsButton,
+                connectedMacName = binding.connectedMacName,
+                connectedMacIp = binding.connectedMacIp,
+            ),
+            storage = pairedHostStorage,
+            cameraPerm = cameraPerm,
+            onConnectRequested = { host, port, token, deviceName, macName ->
+                connectWireless(host, port, token, deviceName, macName)
+            },
+        )
+        wirelessController.bind()
+        binding.wirelessDisconnectButton.setOnClickListener { disconnect() }
+        if (prefs.connectionMode == ConnectionMode.WIRELESS) {
+            wirelessController.show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == WirelessTabController.REQ_SCAN && resultCode == RESULT_OK) {
+            val url = data?.getStringExtra(QRScannerActivity.EXTRA_URL) ?: return
+            wirelessController.onScanResult(url)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == WirelessTabController.REQ_CAMERA) {
+            val granted = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            wirelessController.onCameraPermissionResult(granted)
+        }
     }
 
     /**
@@ -688,6 +760,121 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             mainDiag("Decoder init FAILED: ${e.message}")
             log("❌ Failed to initialize decoder: ${e.message}")
+        }
+    }
+
+    /**
+     * Wire up all StreamClient callbacks. Used by both USB connect() and wireless connectWireless().
+     */
+    private fun setupStreamClientCallbacks() {
+        streamClient?.onFrameReceived = { frameData, frameSize, timestamp ->
+            val dec = videoDecoder
+            if (dec != null) {
+                dec.decode(frameData, frameSize, timestamp)
+            } else {
+                mainDiag("FRAME DROPPED: videoDecoder is null!")
+            }
+        }
+
+        videoDecoder?.onFrameDecoded = { buffer ->
+            streamClient?.releaseBuffer(buffer)
+        }
+
+        streamClient?.onLatencyMeasured = { rttMs ->
+            runOnUiThread {
+                binding.latencyText.text = String.format("%.1f ms", rttMs)
+            }
+        }
+
+        streamClient?.onConnectionStatus = { connected ->
+            runOnUiThread {
+                isConnected = connected
+                if (connected) {
+                    updateStatus("Connected - Streaming active")
+                } else {
+                    updateStatus("Disconnected")
+                }
+                binding.connectButton.isEnabled = !connected
+                binding.disconnectButton.isEnabled = connected
+                binding.statusIndicator.setBackgroundResource(
+                    if (connected) android.R.color.holo_green_light else android.R.color.holo_red_light,
+                )
+                if (connected) {
+                    startPingTimer()
+                    stopChecklistUpdates()
+                    enableFullscreenMode()
+                    binding.settingsPanel.visibility = View.GONE
+                    binding.settingsButton.visibility = View.VISIBLE
+                    restoreSettingsButtonPosition()
+                    updateOverlayVisibility(prefs.showStatsOverlay)
+                } else {
+                    stopPingTimer()
+                    disableFullscreenMode()
+                    resetOrientationToSensor()
+                    binding.settingsPanel.visibility = View.VISIBLE
+                    binding.settingsButton.visibility = View.GONE
+                    binding.statusBar.visibility = View.GONE
+                    log("📋 Restarting checklist updates")
+                    startChecklistUpdates()
+                }
+            }
+        }
+
+        streamClient?.onDisplaySize = { width, height, rotation ->
+            mainDiag("onDisplaySize: ${width}x$height @ $rotation°")
+            displayWidth = width
+            displayHeight = height
+            displayRotation = rotation
+            if (videoDecoder != null) {
+                videoDecoder?.updateResolution(width, height)
+            } else {
+                val holder = currentSurfaceHolder
+                if (holder != null && holder.surface.isValid) {
+                    mainDiag("Display config arrived, initializing decoder ${width}x$height")
+                    runOnUiThread {
+                        if (videoDecoder == null) {
+                            initializeDecoder(holder)
+                        }
+                    }
+                } else {
+                    mainDiag("Display config arrived but no valid surface yet")
+                }
+            }
+            runOnUiThread {
+                binding.resolutionText.text = "${width}x$height"
+                applyRotation(rotation)
+            }
+            log("Display: ${width}x$height @ $rotation°")
+        }
+
+        streamClient?.onStats = { fps, mbps ->
+            runOnUiThread {
+                binding.fpsText.text = String.format("%.1f", fps)
+                binding.bitrateText.text = String.format("%.1f Mbps", mbps)
+            }
+        }
+    }
+
+    private fun connectWireless(host: String, port: Int, token: ByteArray, deviceName: String, macName: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                log("Connecting wirelessly to $host:$port...")
+                streamClient = StreamClient(host, port)
+                setupStreamClientCallbacks()
+                streamClient?.connectWireless(token, deviceName)
+                runOnUiThread {
+                    wirelessController.onConnectSuccess(macName, host)
+                }
+            } catch (e: StreamClient.WirelessConnectError) {
+                runOnUiThread {
+                    wirelessController.onConnectError(e)
+                }
+            } catch (e: Exception) {
+                log("Wireless connect failed: ${e.message}")
+                runOnUiThread {
+                    wirelessController.onConnectError(StreamClient.WirelessConnectError.NetworkUnreachable)
+                }
+            }
         }
     }
 

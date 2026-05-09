@@ -136,6 +136,27 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        // Connection mode picker (USB / Wireless)
+                        HStack(spacing: 6) {
+                            ForEach(ConnectionMode.allCases, id: \.self) { mode in
+                                Button(action: { settings.connectionMode = mode }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: mode == .usb ? "cable.connector" : "wifi")
+                                        Text(mode == .usb ? "USB" : "Wireless")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(settings.connectionMode == mode ? Color.accentColor : Color.clear)
+                                    .foregroundColor(settings.connectionMode == mode ? .white : .primary)
+                                    .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(4)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+
                         // Display Configuration
                         FrostedGroupBox(title: "Display Configuration", icon: "display") {
                             VStack(alignment: .leading, spacing: 16) {
@@ -349,30 +370,35 @@ struct SettingsView: View {
                             }
                         }
 
-                        // Network Settings
-                        FrostedGroupBox(title: "Network Settings", icon: "network") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Server Port")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    TextField("Port", value: $settings.port, format: .number)
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 80)
-                                        .disabled(settings.isRunning)
-                                }
+                        // Network Settings (USB) or Wireless Pair Device + Paired Devices
+                        if settings.connectionMode == .usb {
+                            FrostedGroupBox(title: "Network Settings", icon: "network") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Server Port")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        TextField("Port", value: $settings.port, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 80)
+                                            .disabled(settings.isRunning)
+                                    }
 
-                                if settings.isRunning {
-                                    Text("Stop server to change port")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.orange)
-                                } else if settings.port != 8888 {
-                                    Text("Enter this port in the Android client app")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
+                                    if settings.isRunning {
+                                        Text("Stop server to change port")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.orange)
+                                    } else if settings.port != 8888 {
+                                        Text("Enter this port in the Android client app")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
                             }
+                        } else {
+                            WirelessSection(settings: settings,
+                                            pairedDeviceStore: (NSApp.delegate as? AppDelegate)?.pairedDeviceStore ?? PairedDeviceStore())
                         }
 
                         // Gaming Boost
@@ -520,6 +546,36 @@ struct SettingsView: View {
                                 StatusRow(title: "Accessibility", status: settings.hasAccessibilityPermission ? "Granted" : "Optional", color: settings.hasAccessibilityPermission ? .green : .orange)
                                 if settings.isRunning {
                                     StatusRow(title: "Capture Method", status: settings.captureMethod, color: settings.captureMethod.contains("fallback") ? .orange : .green)
+                                }
+
+                                // Mode-aware contextual rows
+                                Divider().padding(.vertical, 4)
+                                if settings.connectionMode == .usb {
+                                    StatusRow(title: "ADB installed",
+                                              status: settings.adbInstalled ? "Installed" : "Missing",
+                                              color: settings.adbInstalled ? .green : .red)
+                                    if !settings.adbInstalled {
+                                        Text("brew install android-platform-tools")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .padding(6)
+                                            .background(Color.black.opacity(0.08))
+                                            .cornerRadius(4)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .textSelection(.enabled)
+                                    }
+                                    StatusRow(title: "ADB reverse",
+                                              status: settings.adbReverseConfigured ? "OK" : "Pending",
+                                              color: settings.adbReverseConfigured ? .green : .orange)
+                                    StatusRow(title: "USB device",
+                                              status: settings.usbDeviceConnected ? "Detected" : "Not detected",
+                                              color: settings.usbDeviceConnected ? .green : .red)
+                                } else {
+                                    StatusRow(title: "WiFi",
+                                              status: settings.wifiConnected ? "Connected" : "Disconnected",
+                                              color: settings.wifiConnected ? .green : .red)
+                                    StatusRow(title: "Listening on",
+                                              status: settings.listeningAddress.map { "\($0):\(settings.port)" } ?? "—",
+                                              color: settings.listeningAddress != nil ? .green : .secondary)
                                 }
 
                                 if !settings.hasScreenRecordingPermission {
@@ -1122,3 +1178,110 @@ class ConstrainedWindow: NSWindow {
         return constrainedRect
     }
 }
+
+
+// MARK: - Wireless Section
+
+@available(macOS 14.0, *)
+struct WirelessSection: View {
+    @ObservedObject var settings: DisplaySettings
+    let pairedDeviceStore: PairedDeviceStore
+    @State private var qrImage: NSImage? = nil
+    @State private var pairedDevices: [PairedDevice] = []
+    @State private var showResetConfirm = false
+    @State private var refreshTrigger: Int = 0
+
+    var body: some View {
+        VStack(spacing: 12) {
+            FrostedGroupBox(title: "Pair Device", icon: "qrcode") {
+                VStack(spacing: 8) {
+                    if let qr = qrImage {
+                        Image(nsImage: qr)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 180, height: 180)
+                            .padding(8)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    } else {
+                        Text("Generating QR…").foregroundColor(.secondary)
+                    }
+                    Text("Scan this QR from Side Screen Android (Wireless tab)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            FrostedGroupBox(title: "Paired Devices (\(pairedDevices.count))", icon: "ipad.and.iphone") {
+                if pairedDevices.isEmpty {
+                    Text("No devices paired yet.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 6) {
+                        ForEach(pairedDevices, id: \.name) { device in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.name).font(.system(size: 12, weight: .medium))
+                                    Text(device.lastConnected.formatted(.relative(presentation: .named)))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button("Forget") {
+                                    pairedDeviceStore.forget(name: device.name)
+                                    refreshPaired()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(6)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+                Button("Reset Token (forget all)") {
+                    showResetConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .foregroundColor(.red)
+                .padding(.top, 6)
+            }
+        }
+        .onAppear {
+            refreshQR()
+            refreshPaired()
+        }
+        .onChange(of: settings.port) { _, _ in refreshQR() }
+        .alert("Reset Token?", isPresented: $showResetConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                _ = WirelessAuth.reset()
+                pairedDeviceStore.clear()
+                refreshQR()
+                refreshPaired()
+            }
+        } message: {
+            Text("This will disconnect all paired devices. They will need to scan the new QR to connect again.")
+        }
+    }
+
+    private func refreshQR() {
+        let token = WirelessAuth.loadOrCreate()
+        let host = LANAddressResolver.primaryIPv4() ?? "0.0.0.0"
+        let name = Host.current().localizedName ?? "Mac"
+        let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
+        qrImage = QRRenderer.render(url: url, size: 180)
+    }
+
+    private func refreshPaired() {
+        pairedDevices = pairedDeviceStore.all()
+    }
+}
+

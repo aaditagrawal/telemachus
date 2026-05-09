@@ -57,3 +57,4 @@ docs/
 tmp/
 temp/
 *.tmp
+.superpowers/

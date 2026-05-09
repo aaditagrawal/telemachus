@@ -10,10 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- WiFi Direct support (wireless mode)
+- mDNS auto-discovery for wireless mode
 - Audio streaming
 - Multi-touch gestures
 - Stylus/pen support
+
+---
+
+<a id="0.8.0"></a>
+## [0.8.0] - 2026-MM-DD
+
+Wireless connection mode — Android client can now connect to the Mac host over WiFi LAN via one-time QR pairing, no USB cable required. USB mode unchanged and remains the default.
+
+### Added
+- **Wireless mode** — pair via QR scan, auto-reconnect on every launch, secure by token. Built on the same short-GOP encoder pipeline that landed in 0.7.0, so quality matches USB whenever your WiFi is healthy.
+- **Mode-aware status checklist** — Mac status section now adapts to your connection mode. USB mode tells you when ADB is missing (with the `brew install` command right there). Wireless mode shows your WiFi state and listening address.
+- **Paired devices on Mac** — see every tablet you've paired with, forget devices individually, or rotate the auth token to revoke access for all of them at once.
+
+### Changed
+- Android connection screen now has a top-level **USB / Wireless** segmented switcher. Manual host/port entry stays in the USB tab unchanged.
+
+### Notes
+- Wireless adds 10–50 ms of latency depending on WiFi quality. For text/web/video it's not noticeable. For drawing precision or fast-paced gaming, USB still wins.
+- The token authorizing wireless connections is generated on first launch and stored locally — anyone with your Mac's QR can pair, so don't share it broadcast-style. "Reset Token" on Mac revokes all paired devices.
+
+### Installation
+- **macOS**: Open `SideScreen-0.8.0-mac-universal.dmg`, drag SideScreen to Applications. If Gatekeeper says "damaged"/"cannot be opened": `sudo xattr -cr /Applications/SideScreen.app`
+- **Android**: Install `SideScreen-0.8.0-android.apk` (enable "Unknown sources" if needed). Wireless mode requires camera permission to scan the pairing QR.
+- **First wireless pairing**: open Side Screen on Mac → toggle to Wireless tab → scan the displayed QR with the Android app's Wireless tab.
 
 ---
 

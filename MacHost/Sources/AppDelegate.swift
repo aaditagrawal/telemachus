@@ -53,8 +53,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settings = DisplaySettings()
     var settingsWindow: SettingsWindowController?
     var statusItem: NSStatusItem?
+    let pairedDeviceStore = PairedDeviceStore()
     private var cancellables = Set<AnyCancellable>()
     private var permissionCheckTimer: Timer?
+    private var statusRefreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("✅ App launched")
@@ -73,8 +75,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await checkPermissions()
         }
 
+        // Periodic status refresh for the per-mode checklist (ADB / WiFi / Listening IP).
+        statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshStatusIndicators()
+            }
+        }
+        // Initial refresh so the UI isn't blank for 2 seconds.
+        Task { @MainActor in
+            refreshStatusIndicators()
+        }
+
         // Show settings window
         showSettings()
+    }
+
+    @MainActor
+    private func refreshStatusIndicators() {
+        settings.adbInstalled = StatusDetector.adbInstalled()
+        settings.wifiConnected = StatusDetector.wifiReachable()
+        settings.listeningAddress = LANAddressResolver.primaryIPv4()
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            let port = await self.settings.port
+            let devices = StatusDetector.usbDevices()
+            let reverseOK = StatusDetector.adbReverseConfigured(port: Int(port))
+            await MainActor.run {
+                self.settings.usbDeviceConnected = !devices.isEmpty
+                self.settings.adbReverseConfigured = reverseOK
+            }
+        }
+    }
+
+    @MainActor
+    private func handleConnectionModeChange(to mode: ConnectionMode) async {
+        debugLog("Connection mode changed to: \(mode.rawValue)")
+        // Disconnect any active client immediately (per spec §6 / fix #2).
+        let wasRunning = settings.isRunning
+        if wasRunning {
+            stopServer()
+        }
+        if mode == .wireless {
+            // Generate token if missing; the QR will reflect it.
+            _ = WirelessAuth.loadOrCreate()
+        }
+        if wasRunning {
+            await startServer()
+        }
     }
 
     /// Check permissions on demand (called when settings window opens or manually)
@@ -129,6 +176,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] enabled in
                 self?.streamingServer?.touchEnabled = enabled
+            }
+            .store(in: &cancellables)
+
+        // Observer cho connection mode changes — restart server with new auth/ADB policy.
+        settings.$connectionMode
+            .dropFirst()
+            .sink { [weak self] mode in
+                Task { @MainActor in
+                    await self?.handleConnectionModeChange(to: mode)
+                }
             }
             .store(in: &cancellables)
     }
@@ -367,10 +424,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 settings.displayCreated = true
             }
 
-            // Run ADB setup and display init wait in parallel
-            // ADB must complete before server starts (fixes race condition on first install)
+            // Run ADB setup (USB only) and display init wait in parallel.
+            // For wireless mode, skip ADB entirely — the auth handshake gates LAN connections instead.
             await withTaskGroup(of: Void.self) { group in
-                group.addTask { await self.setupADBReverse() }
+                if settings.connectionMode == .usb {
+                    group.addTask { await self.setupADBReverse() }
+                } else {
+                    debugLog("Wireless mode: skipping ADB setup")
+                }
                 group.addTask { try? await Task.sleep(nanoseconds: 500_000_000) }
             }
 
@@ -399,6 +460,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Setup server
             streamingServer = StreamingServer(port: settings.port)
             streamingServer?.touchEnabled = settings.touchEnabled
+            if settings.connectionMode == .wireless {
+                streamingServer?.expectedAuthToken = WirelessAuth.loadOrCreate()
+                streamingServer?.onWirelessClientPaired = { [weak self] deviceName in
+                    Task { @MainActor in
+                        self?.pairedDeviceStore.upsert(name: deviceName, lastConnected: Date())
+                    }
+                }
+            }
             // Use physical pixel dimensions from the live display (accounts for HiDPI 2x scaling)
             let physWidth = screenCapture?.displayWidth ?? size.width
             let physHeight = screenCapture?.displayHeight ?? size.height

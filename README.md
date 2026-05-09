@@ -152,10 +152,22 @@ cd AndroidClient && ./gradlew assembleDebug
 
 ## Usage
 
+### USB mode (default — lowest latency)
+
 1. Connect tablet to Mac via **USB-C**
 2. Launch **Side Screen** on Mac (runs in menu bar — port forwarding is set up automatically)
-3. Open **Side Screen** on tablet → tap **Connect**
+3. Open **Side Screen** on tablet → keep on the **USB** tab → tap **Connect**
 4. Done — drag windows to your new display
+
+### Wireless mode (new in 0.8.0 — no cable)
+
+1. Launch **Side Screen** on Mac → toggle to the **Wireless** tab → a QR code appears
+2. Open **Side Screen** on tablet → switch to the **Wireless** tab → tap **Scan QR Code** → grant camera permission → aim at the QR on the Mac
+3. The tablet remembers the Mac. Subsequent launches auto-reconnect — no rescan.
+
+Wireless mode requires both devices to be on the same WiFi network. **5 GHz is strongly recommended** — 2.4 GHz can introduce noticeable jitter on dynamic content. If you need to revoke access, click **Reset Token (forget all)** on the Mac and re-pair each tablet.
+
+USB mode remains the lowest-latency option for drawing or fast-paced gaming. Wireless adds 10–50 ms depending on WiFi quality.
 
 ---
 

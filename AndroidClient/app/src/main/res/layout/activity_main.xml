@@ -195,7 +195,40 @@
                 android:textColor="#999999"
                 android:textSize="14sp"
                 android:gravity="center"
-                android:layout_marginBottom="24dp" />
+                android:layout_marginBottom="20dp" />
+
+            <!-- Mode toggle: USB / Wireless -->
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/modeToggleGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/modeUSB"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="USB" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/modeWireless"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Wireless" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            <!-- ============= USB MODE CONTENT ============= -->
+            <LinearLayout
+                android:id="@+id/usbModeContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
             <!-- Connection Checklist -->
             <LinearLayout
@@ -401,6 +434,198 @@
                 android:textSize="13sp"
                 android:gravity="center"
                 android:padding="8dp" />
+
+            </LinearLayout>
+            <!-- ============= /USB MODE CONTENT ============= -->
+
+            <!-- ============= WIRELESS MODE CONTENT ============= -->
+            <LinearLayout
+                android:id="@+id/wirelessModeContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- State 1: First-time -->
+                <LinearLayout
+                    android:id="@+id/wirelessFirstTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Pair với Mac của bạn"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Mở Side Screen trên Mac → bật tab Wireless → scan QR hiện ra"
+                        android:textColor="#BBBBBB"
+                        android:textSize="13sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessScanButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="Scan QR Code"
+                        android:textSize="16sp"
+                        app:cornerRadius="16dp"
+                        app:backgroundTint="#4ade80"
+                        android:textColor="#000000" />
+                </LinearLayout>
+
+                <!-- State 3: Connected -->
+                <LinearLayout
+                    android:id="@+id/wirelessConnected"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="● Connected"
+                        android:textColor="#4ade80"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/connectedMacName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Mac"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:gravity="center" />
+
+                    <TextView
+                        android:id="@+id/connectedMacIp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="—"
+                        android:textColor="#888888"
+                        android:textSize="12sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessDisconnectButton"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Disconnect"
+                        android:layout_marginBottom="8dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessForgetButton"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Forget this Mac"
+                        android:textColor="#fca5a5"
+                        app:strokeColor="#7f1d1d" />
+                </LinearLayout>
+
+                <!-- State 4: Token mismatch / re-pair -->
+                <LinearLayout
+                    android:id="@+id/wirelessTokenMismatch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="⚠ Cần pair lại"
+                        android:textColor="#fca5a5"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Mac đã reset token (vd Forget Devices) hoặc reinstall. Scan lại QR để pair tiếp."
+                        android:textColor="#BBBBBB"
+                        android:textSize="13sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessRescanButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="Scan QR Code"
+                        app:cornerRadius="16dp"
+                        app:backgroundTint="#4ade80"
+                        android:textColor="#000000" />
+                </LinearLayout>
+
+                <!-- State 5: Permission denied permanently -->
+                <LinearLayout
+                    android:id="@+id/wirelessPermDenied"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Cần camera permission để scan QR"
+                        android:textColor="#FFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Bạn đã chặn permission. Mở Settings → Apps → Side Screen → Permissions để cho phép."
+                        android:textColor="#BBBBBB"
+                        android:textSize="13sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessOpenSettingsButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="Mở Settings"
+                        app:cornerRadius="16dp"
+                        app:backgroundTint="#007AFF" />
+                </LinearLayout>
+
+            </LinearLayout>
+            <!-- ============= /WIRELESS MODE CONTENT ============= -->
 
             <!-- Hidden disconnect button reference (needed by code) -->
             <com.google.android.material.button.MaterialButton
