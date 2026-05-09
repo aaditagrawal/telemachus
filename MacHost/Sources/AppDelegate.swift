@@ -54,6 +54,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindow: SettingsWindowController?
     var statusItem: NSStatusItem?
     let pairedDeviceStore = PairedDeviceStore()
+    /// Name of the wireless device currently streaming (nil when no wireless client is active).
+    /// Used to roll its `lastConnected` timestamp forward every status refresh tick so the UI
+    /// shows "just now" while connected and freezes at the disconnect moment afterward.
+    private var currentWirelessDevice: String?
     private var cancellables = Set<AnyCancellable>()
     private var permissionCheckTimer: Timer?
     private var statusRefreshTimer: Timer?
@@ -95,6 +99,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.adbInstalled = StatusDetector.adbInstalled()
         settings.wifiConnected = StatusDetector.wifiReachable()
         settings.listeningAddress = LANAddressResolver.primaryIPv4()
+
+        // While a wireless client is actively streaming, keep its lastConnected
+        // rolling forward so the UI shows "just now". On disconnect, the
+        // onClientDisconnected handler clears currentWirelessDevice — from that
+        // point lastConnected stays frozen at the disconnect moment, so the
+        // "X minutes ago" label counts up correctly.
+        if let name = currentWirelessDevice {
+            pairedDeviceStore.upsert(name: name, lastConnected: Date())
+        }
+
         Task.detached { [weak self] in
             guard let self = self else { return }
             let port = await self.settings.port
@@ -464,19 +478,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 streamingServer?.expectedAuthToken = WirelessAuth.loadOrCreate()
                 streamingServer?.onWirelessClientPaired = { [weak self] deviceName in
                     Task { @MainActor in
+                        self?.currentWirelessDevice = deviceName
+                        self?.settings.currentWirelessDevice = deviceName
                         self?.pairedDeviceStore.upsert(name: deviceName, lastConnected: Date())
                     }
                 }
             }
-            // Use physical pixel dimensions from the live display (accounts for HiDPI 2x scaling)
-            let physWidth = screenCapture?.displayWidth ?? size.width
-            let physHeight = screenCapture?.displayHeight ?? size.height
-            streamingServer?.setDisplaySize(width: physWidth, height: physHeight, rotation: settings.rotation)
+            // Send the LOGICAL resolution that the user picked. The H.264 SPS in
+            // the stream still carries the true physical pixel dimensions, so the
+            // Android decoder/MediaCodec sets up correctly regardless. Sending the
+            // logical dimensions here makes the resolution overlay on Android
+            // match the Mac's resolution dropdown (e.g. "2560x1600" instead of
+            // the HiDPI-doubled "5120x3200").
+            streamingServer?.setDisplaySize(width: size.width, height: size.height, rotation: settings.rotation)
             streamingServer?.onClientConnected = { [weak self] in
                 guard let self = self else { return }
                 self.screenCapture?.requestKeyframeOrReplayCachedFrame()
                 Task { @MainActor in
                     self.settings.clientConnected = true
+                }
+            }
+
+            streamingServer?.onClientDisconnected = { [weak self] in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    self.settings.clientConnected = false
+                    // Final lastConnected snapshot at the disconnect moment, then
+                    // freeze (currentWirelessDevice = nil stops the rolling update
+                    // in refreshStatusIndicators).
+                    if let name = self.currentWirelessDevice {
+                        self.pairedDeviceStore.upsert(name: name, lastConnected: Date())
+                        self.currentWirelessDevice = nil
+                        self.settings.currentWirelessDevice = nil
+                    }
                 }
             }
 

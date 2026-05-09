@@ -124,23 +124,43 @@ class MainActivity : AppCompatActivity() {
     private fun applyModeVisibility(mode: ConnectionMode) {
         binding.usbModeContent.visibility = if (mode == ConnectionMode.USB) View.VISIBLE else View.GONE
         binding.wirelessModeContent.visibility = if (mode == ConnectionMode.WIRELESS) View.VISIBLE else View.GONE
+        // USB checklist polls 127.0.0.1:port every 2s via adb-reverse to verify Mac
+        // server reachability. While in Wireless mode that probe creates loopback
+        // connections that fight the wireless session for the Mac's single client
+        // slot — kicking the wireless client off seconds after it auths. Pause
+        // checklist updates whenever Wireless is the active tab.
+        if (mode == ConnectionMode.WIRELESS) {
+            stopChecklistUpdates()
+        } else {
+            startChecklistUpdates()
+        }
     }
 
     private fun setupWirelessController() {
         wirelessController = WirelessTabController(
             activity = this,
             views = WirelessTabController.Views(
+                connecting = binding.wirelessConnecting,
                 firstTime = binding.wirelessFirstTime,
                 connected = binding.wirelessConnected,
-                tokenMismatch = binding.wirelessTokenMismatch,
+                pairedIdle = binding.wirelessPairedIdle,
+                repair = binding.wirelessTokenMismatch,
                 permDenied = binding.wirelessPermDenied,
                 scanButton = binding.wirelessScanButton,
                 rescanButton = binding.wirelessRescanButton,
                 disconnectButton = binding.wirelessDisconnectButton,
                 forgetButton = binding.wirelessForgetButton,
+                reconnectButton = binding.wirelessReconnectButton,
+                idleForgetButton = binding.wirelessIdleForgetButton,
                 openSettingsButton = binding.wirelessOpenSettingsButton,
                 connectedMacName = binding.connectedMacName,
                 connectedMacIp = binding.connectedMacIp,
+                connectingLabel = binding.connectingLabel,
+                connectingSubtitle = binding.connectingSubtitle,
+                idleMacName = binding.idleMacName,
+                idleMacIp = binding.idleMacIp,
+                repairTitle = binding.repairTitle,
+                repairMessage = binding.repairMessage,
             ),
             storage = pairedHostStorage,
             cameraPerm = cameraPerm,
@@ -295,7 +315,7 @@ class MainActivity : AppCompatActivity() {
             val port =
                 binding.portInput.text
                     .toString()
-                    .toIntOrNull() ?: 8888
+                    .toIntOrNull() ?: 54321
 
             // Convert localhost to 127.0.0.1 for better Android compatibility
             if (host.equals("localhost", ignoreCase = true)) {
@@ -454,6 +474,10 @@ class MainActivity : AppCompatActivity() {
         val resetSettingsBtn = view.findViewById<View>(R.id.resetSettingsButton)
         val disconnectButton = view.findViewById<View>(R.id.disconnectSettingsButton)
         val closeButton = view.findViewById<View>(R.id.closeButton)
+
+        // Only show Disconnect when actually streaming. Otherwise the button is
+        // a no-op and confuses users into clicking it twice.
+        disconnectButton.visibility = if (isConnected) View.VISIBLE else View.GONE
 
         // Position buttons (8 directions)
         val cornerTopLeft = view.findViewById<MaterialButton>(R.id.cornerTopLeft)
@@ -807,6 +831,17 @@ class MainActivity : AppCompatActivity() {
                     binding.settingsButton.visibility = View.VISIBLE
                     restoreSettingsButtonPosition()
                     updateOverlayVisibility(prefs.showStatsOverlay)
+                    // For wireless mode, transition controller to CONNECTED here —
+                    // not in MainActivity.connectWireless's coroutine after the
+                    // receive loop returns (that runs AFTER disconnect, causing
+                    // a stale CONNECTED transition that hides the PAIRED_IDLE UI).
+                    if (prefs.connectionMode == ConnectionMode.WIRELESS) {
+                        val entry = pairedHostStorage.load()
+                        wirelessController.onConnectSuccess(
+                            entry?.macName ?: "Mac",
+                            entry?.host ?: "—",
+                        )
+                    }
                 } else {
                     stopPingTimer()
                     disableFullscreenMode()
@@ -814,8 +849,16 @@ class MainActivity : AppCompatActivity() {
                     binding.settingsPanel.visibility = View.VISIBLE
                     binding.settingsButton.visibility = View.GONE
                     binding.statusBar.visibility = View.GONE
-                    log("📋 Restarting checklist updates")
-                    startChecklistUpdates()
+                    val mode = prefs.connectionMode
+                    android.util.Log.i("MainActivity", "onConnectionStatus(false) — mode=$mode, will transition wirelessController=${mode == ConnectionMode.WIRELESS}")
+                    if (mode == ConnectionMode.WIRELESS) {
+                        // Don't restart checklist (it conflicts with wireless on Mac).
+                        // Tell wireless controller to show the idle/reconnect UI.
+                        wirelessController.onStreamDisconnected()
+                    } else {
+                        log("📋 Restarting checklist updates")
+                        startChecklistUpdates()
+                    }
                 }
             }
         }
@@ -859,12 +902,13 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 log("Connecting wirelessly to $host:$port...")
-                streamClient = StreamClient(host, port)
+                streamClient = StreamClient(host, port, applicationContext)
                 setupStreamClientCallbacks()
                 streamClient?.connectWireless(token, deviceName)
-                runOnUiThread {
-                    wirelessController.onConnectSuccess(macName, host)
-                }
+                // NOTE: onConnectSuccess is fired from the onConnectionStatus(true)
+                // listener (above) right after handshake OK — not here. This line
+                // would otherwise run AFTER the receive loop exits, i.e. AFTER
+                // disconnect, incorrectly transitioning back to CONNECTED.
             } catch (e: StreamClient.WirelessConnectError) {
                 runOnUiThread {
                     wirelessController.onConnectError(e)
@@ -1027,7 +1071,7 @@ class MainActivity : AppCompatActivity() {
                         else -> {
                             "Connection failed: ${e.message}\n\n" +
                                 "Try:\n• Start Side Screen.app on Mac\n" +
-                                "• Check USB connection\n• Run: adb reverse tcp:8888 tcp:8888"
+                                "• Check USB connection\n• Run: adb reverse tcp:$port tcp:$port"
                         }
                     }
                 updateStatus("Connection failed")
@@ -1248,7 +1292,7 @@ class MainActivity : AppCompatActivity() {
             val port =
                 binding.portInput.text
                     .toString()
-                    .toIntOrNull() ?: 8888
+                    .toIntOrNull() ?: 54321
             val isServerRunning = checkServerRunning("127.0.0.1", port)
             runOnUiThread {
                 // Final check before updating UI

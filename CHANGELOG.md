@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <a id="0.8.0"></a>
-## [0.8.0] - 2026-MM-DD
+## [0.8.0] - 2026-05-09
 
 Wireless connection mode — Android client can now connect to the Mac host over WiFi LAN via one-time QR pairing, no USB cable required. USB mode unchanged and remains the default.
 
@@ -29,6 +29,8 @@ Wireless connection mode — Android client can now connect to the Mac host over
 
 ### Changed
 - Android connection screen now has a top-level **USB / Wireless** segmented switcher. Manual host/port entry stays in the USB tab unchanged.
+- **Default port changed from 8888 to 54321** (8888 collides with HP printers, Splunk, Jupyter, and many dev tools — fresh installs now default to 54321; existing users keep their saved value).
+- Status section rows now have an `info.circle` icon next to each label — hover to see what the row means and how to fix it.
 
 ### Notes
 - Wireless adds 10–50 ms of latency depending on WiFi quality. For text/web/video it's not noticeable. For drawing precision or fast-paced gaming, USB still wins.

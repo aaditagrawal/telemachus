@@ -151,9 +151,11 @@
     <androidx.cardview.widget.CardView
         android:id="@+id/settingsPanel"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:layout_marginStart="32dp"
         android:layout_marginEnd="32dp"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="24dp"
         android:elevation="24dp"
         app:cardCornerRadius="32dp"
         app:cardBackgroundColor="#E6000000"
@@ -161,6 +163,11 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -208,19 +215,25 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/modeUSB"
-                    style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="USB" />
+                    android:text="USB"
+                    android:textColor="@color/mode_toggle_text"
+                    app:backgroundTint="@color/mode_toggle_bg"
+                    app:strokeColor="#444444"
+                    app:strokeWidth="1dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/modeWireless"
-                    style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="Wireless" />
+                    android:text="Wireless"
+                    android:textColor="@color/mode_toggle_text"
+                    app:backgroundTint="@color/mode_toggle_bg"
+                    app:strokeColor="#444444"
+                    app:strokeWidth="1dp" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
             <!-- ============= USB MODE CONTENT ============= -->
@@ -416,7 +429,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:hint="Port"
-                        android:text="8888"
+                        android:text="54321"
                         android:textColor="#FFFFFF"
                         android:textColorHint="#888888"
                         android:inputType="number" />
@@ -446,6 +459,45 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
+                <!-- State: Connecting (auto or after scan) -->
+                <LinearLayout
+                    android:id="@+id/wirelessConnecting"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="24dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:indeterminateTint="#4CAF50"
+                        android:layout_marginBottom="16dp" />
+
+                    <TextView
+                        android:id="@+id/connectingLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Connecting…"
+                        android:textColor="#FFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="6dp" />
+
+                    <TextView
+                        android:id="@+id/connectingSubtitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text=""
+                        android:textColor="#999999"
+                        android:textSize="12sp"
+                        android:gravity="center" />
+                </LinearLayout>
+
                 <!-- State 1: First-time -->
                 <LinearLayout
                     android:id="@+id/wirelessFirstTime"
@@ -459,7 +511,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Pair với Mac của bạn"
+                        android:text="Pair with your Mac"
                         android:textColor="#FFFFFF"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -469,7 +521,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Mở Side Screen trên Mac → bật tab Wireless → scan QR hiện ra"
+                        android:text="Open Side Screen on your Mac → switch to the Wireless tab → scan the QR shown"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
@@ -545,6 +597,68 @@
                         app:strokeColor="#7f1d1d" />
                 </LinearLayout>
 
+                <!-- State: Paired idle (after explicit Disconnect) -->
+                <LinearLayout
+                    android:id="@+id/wirelessPairedIdle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/instruction_bg"
+                    android:layout_marginBottom="20dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="○ Disconnected"
+                        android:textColor="#888888"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/idleMacName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Mac"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:gravity="center" />
+
+                    <TextView
+                        android:id="@+id/idleMacIp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="—"
+                        android:textColor="#888888"
+                        android:textSize="12sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessReconnectButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="Reconnect"
+                        android:textSize="16sp"
+                        app:cornerRadius="16dp"
+                        app:backgroundTint="#4CAF50"
+                        android:textColor="#FFFFFF"
+                        android:layout_marginBottom="8dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessIdleForgetButton"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Forget this Mac"
+                        android:textColor="#fca5a5"
+                        app:strokeColor="#7f1d1d" />
+                </LinearLayout>
+
                 <!-- State 4: Token mismatch / re-pair -->
                 <LinearLayout
                     android:id="@+id/wirelessTokenMismatch"
@@ -557,9 +671,10 @@
                     android:visibility="gone">
 
                     <TextView
+                        android:id="@+id/repairTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="⚠ Cần pair lại"
+                        android:text="⚠ Couldn't connect"
                         android:textColor="#fca5a5"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -567,9 +682,10 @@
                         android:layout_marginBottom="8dp" />
 
                     <TextView
+                        android:id="@+id/repairMessage"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Mac đã reset token (vd Forget Devices) hoặc reinstall. Scan lại QR để pair tiếp."
+                        android:text="Scan a fresh QR from your Mac to re-pair."
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
@@ -599,7 +715,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Cần camera permission để scan QR"
+                        android:text="Camera permission required to scan QR"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp"
                         android:textStyle="bold"
@@ -609,7 +725,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Bạn đã chặn permission. Mở Settings → Apps → Side Screen → Permissions để cho phép."
+                        android:text="You blocked the permission. Open Settings → Apps → Side Screen → Permissions to allow."
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
@@ -619,7 +735,7 @@
                         android:id="@+id/wirelessOpenSettingsButton"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:text="Mở Settings"
+                        android:text="Open Settings"
                         app:cornerRadius="16dp"
                         app:backgroundTint="#007AFF" />
                 </LinearLayout>
@@ -635,6 +751,7 @@
                 android:visibility="gone" />
 
         </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
     </androidx.cardview.widget.CardView>
 
     <!-- Hidden log text (needed by code) -->

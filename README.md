@@ -6,7 +6,7 @@
 
 <h1>Side Screen</h1>
 
-<p><em>Turn your Android tablet into a second display for macOS via USB-C</em></p>
+<p><em>Turn your Android tablet into a second display for macOS — USB-C or wireless over WiFi</em></p>
 
 <p>
   <img src="https://img.shields.io/github/v/release/tranvuongquocdat/SideScreen?style=for-the-badge&label=version&color=blue" alt="Version">
@@ -39,9 +39,9 @@
 
 ## About
 
-Side Screen brings true second-display functionality to your Android tablet over USB-C, something macOS doesn't natively support.
+Side Screen brings true second-display functionality to your Android tablet — over USB-C cable for the lowest latency, or wirelessly over WiFi after a one-time QR pair. Something macOS doesn't natively support either way.
 
-While Apple's Sidecar only works with iPads, millions of Android tablets sit unused as potential workstations. Side Screen bridges that gap with hardware-accelerated H.265 streaming, sub-16ms pipeline latency, and full touch input — making your tablet feel like a real monitor, not a laggy mirror.
+While Apple's Sidecar only works with iPads, millions of Android tablets sit unused as potential workstations. Side Screen bridges that gap with hardware-accelerated H.265 streaming, sub-16ms pipeline latency on USB, and full touch input — making your tablet feel like a real monitor, not a laggy mirror.
 
 Built entirely open-source, Side Screen is designed to be fast, lightweight, and seamlessly integrated.
 
@@ -52,6 +52,10 @@ For full details, features, and documentation, please visit **[sidescreen.dev](h
 ---
 
 ## Features
+
+### USB-C or Wireless
+
+Two ways to connect, same picture quality. **USB-C** plugs in the cable for the lowest possible latency — adb-reverse port forwarding is set up automatically. **Wireless** lets you scan a QR code from the Mac once and the tablet auto-reconnects on every future launch over WiFi (5 GHz strongly recommended). The auth token is generated locally and stays on your Mac; reset it any time to revoke access.
 
 ### Virtual Display
 
@@ -103,7 +107,8 @@ Configure resolution (up to 4K/8K), frame rate (30–120 FPS), bitrate (20–500
 |---|---|---|
 | **OS** | macOS 14 (Sonoma)+ | Android 8.0 (API 26)+ |
 | **Hardware** | Apple Silicon or Intel | H.265 hardware decoder |
-| **Connection** | USB-C port | USB-C cable |
+| **USB mode** | USB-C port + `adb` (`brew install android-platform-tools`) | USB-C cable + USB Debugging enabled |
+| **Wireless mode** | Same WiFi network as the tablet (5 GHz recommended) | Camera (for QR scan) + Google Play Services (for ML Kit barcode) |
 
 ---
 
@@ -208,7 +213,23 @@ The Mac app sets up `adb reverse` automatically when streaming starts. If it sti
 
 - Lower resolution or frame rate
 - Ensure H.265 hardware codec support on your device
-- Use a high-quality USB-C cable (not charge-only)
+- For USB mode, use a high-quality USB-C cable (not charge-only)
+- For wireless mode, ensure both devices are on **5 GHz WiFi**, not 2.4 GHz; reduce refresh rate to 60 Hz if jitter persists
+</details>
+
+<details>
+<summary><strong>Wireless: "Couldn't reach Mac" / connection times out</strong></summary>
+
+- Both devices must be on the same WiFi network (and same subnet — some mesh routers isolate "guest" devices)
+- Click **Start** on the Mac before scanning the QR — the listener only binds when the server is running
+- If the Mac changes WiFi or its LAN IP, scan a fresh QR (the cached one points to the old address)
+- macOS may prompt for **Local Network** permission on first wireless toggle — grant it; without it, LAN inbound is silently dropped
+</details>
+
+<details>
+<summary><strong>Wireless: "Re-pair required" after restart / reinstall</strong></summary>
+
+The Mac's auth token resets when you click **Reset Token (forget all)** or reinstall the app. Tap **Scan QR Code** on the Android client and scan the new QR shown on the Mac.
 </details>
 
 <details>
@@ -238,8 +259,11 @@ If Side Screen is useful to you, consider supporting development:
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/tranvuongqk)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/tranvuongquocdat)
+[![VietQR](https://img.shields.io/badge/Vietnam-VietQR-DA251D?style=for-the-badge&logoColor=white)](https://sidescreen.dev/donate.html)
 
 </div>
+
+🇻🇳 Vietnamese users — scan VietQR for a local bank transfer (no international fees) at [sidescreen.dev/donate](https://sidescreen.dev/donate.html).
 
 ---
 

@@ -57,10 +57,49 @@ enum StatusDetector {
         return output.contains("tcp:\(port) tcp:\(port)")
     }
 
+    private static var cachedAdbPath: String?
+    private static var lastAdbCacheCheck: Date = .distantPast
+
     private static func adbExecutablePath() -> String? {
-        for path in ["/opt/homebrew/bin/adb", "/usr/local/bin/adb"] {
-            if FileManager.default.isExecutableFile(atPath: path) { return path }
+        // Re-resolve every 5 s so install/uninstall is reflected.
+        if let cached = cachedAdbPath, Date().timeIntervalSince(lastAdbCacheCheck) < 5.0 {
+            return cached
         }
+        let candidatePaths = [
+            "/opt/homebrew/bin/adb",
+            "/usr/local/bin/adb",
+            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
+        ]
+        for path in candidatePaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                cachedAdbPath = path
+                lastAdbCacheCheck = Date()
+                return path
+            }
+        }
+        // Fallback: ask `which adb` (covers PATH-installed setups).
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        task.arguments = ["adb"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !out.isEmpty,
+               FileManager.default.isExecutableFile(atPath: out) {
+                cachedAdbPath = out
+                lastAdbCacheCheck = Date()
+                return out
+            }
+        } catch {
+            // ignore
+        }
+        cachedAdbPath = nil
+        lastAdbCacheCheck = Date()
         return nil
     }
 }

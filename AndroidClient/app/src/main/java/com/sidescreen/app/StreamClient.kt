@@ -1,5 +1,8 @@
 package com.sidescreen.app
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +21,7 @@ import java.util.concurrent.TimeUnit
 class StreamClient(
     private val host: String,
     private val port: Int,
+    private val context: Context? = null,
 ) {
     private var socket: Socket? = null
     private var inputStream: DataInputStream? = null
@@ -122,16 +126,39 @@ class StreamClient(
      */
     suspend fun connectWireless(token: ByteArray, deviceName: String) =
         withContext(Dispatchers.IO) {
+            Log.i(TAG, "connectWireless: trying $host:$port (device=$deviceName, token bytes=${token.size})")
+
+            // Force the socket onto the active WiFi network. On some Android setups
+            // (especially LG/Android 12), an app's default outbound socket may take
+            // a route that silently drops LAN traffic; binding to the WIFI Network
+            // explicitly avoids that.
             val s = try {
-                Socket().apply {
-                    tcpNoDelay = true
-                    connect(java.net.InetSocketAddress(host, port), 5000)
+                val sock = Socket()
+                sock.tcpNoDelay = true
+                val wifiNetwork = context?.let { ctx ->
+                    val cm = ctx.getSystemService(ConnectivityManager::class.java)
+                    cm.allNetworks.firstOrNull { net ->
+                        val caps = cm.getNetworkCapabilities(net)
+                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    }
                 }
+                if (wifiNetwork != null) {
+                    Log.i(TAG, "connectWireless: binding socket to WiFi network $wifiNetwork")
+                    wifiNetwork.bindSocket(sock)
+                } else {
+                    Log.w(TAG, "connectWireless: no WiFi network found, using default routing")
+                }
+                sock.connect(java.net.InetSocketAddress(host, port), 5000)
+                sock
             } catch (e: java.net.SocketTimeoutException) {
+                Log.e(TAG, "connectWireless: TCP connect timeout to $host:$port (5s)")
                 throw WirelessConnectError.NetworkUnreachable
             } catch (e: IOException) {
+                Log.e(TAG, "connectWireless: TCP connect failed to $host:$port: ${e.javaClass.simpleName}: ${e.message}")
                 throw WirelessConnectError.NetworkUnreachable
             }
+            Log.i(TAG, "connectWireless: TCP connected, sending handshake (${37 + deviceName.toByteArray().size} bytes)")
 
             val request = AuthHandshake.encodeRequest(token, deviceName)
             try {
@@ -163,6 +190,7 @@ class StreamClient(
                 try { s.close() } catch (_: IOException) {}
                 throw WirelessConnectError.ProtocolError
             }
+            Log.i(TAG, "connectWireless: handshake response status=$status")
             when (status) {
                 AuthHandshake.ResponseStatus.OK -> {
                     socket = s
