@@ -6,7 +6,6 @@ enum class ConnectionMode {
     ;
 
     companion object {
-        fun fromName(name: String?): ConnectionMode =
-            values().firstOrNull { it.name == name } ?: USB
+        fun fromName(name: String?): ConnectionMode = values().firstOrNull { it.name == name } ?: USB
     }
 }

@@ -18,7 +18,13 @@ class WirelessTabController(
     private val views: Views,
     private val storage: PairedHostStorage,
     private val cameraPerm: CameraPermissionManager,
-    private val onConnectRequested: (host: String, port: Int, token: ByteArray, deviceName: String, macName: String) -> Unit,
+    private val onConnectRequested: (
+        host: String,
+        port: Int,
+        token: ByteArray,
+        deviceName: String,
+        macName: String,
+    ) -> Unit,
 ) {
     data class Views(
         val connecting: View,
@@ -61,10 +67,11 @@ class WirelessTabController(
             transition(State.FIRST_TIME)
         }
         views.reconnectButton.setOnClickListener {
-            val entry = storage.load() ?: run {
-                transition(State.FIRST_TIME)
-                return@setOnClickListener
-            }
+            val entry =
+                storage.load() ?: run {
+                    transition(State.FIRST_TIME)
+                    return@setOnClickListener
+                }
             showConnecting("Reconnecting to ${entry.macName}", "${entry.host}:${entry.port}")
             attemptAutoConnect(entry)
         }
@@ -75,11 +82,15 @@ class WirelessTabController(
      * Move the UI to a clean "paired but idle" state showing the Mac info + Reconnect button.
      */
     fun onStreamDisconnected() {
-        android.util.Log.i("WirelessTabController", "onStreamDisconnected called, current state=$state, storage entry exists=${storage.load() != null}")
-        val entry = storage.load() ?: run {
-            transition(State.FIRST_TIME)
-            return
-        }
+        android.util.Log.i(
+            "WirelessTabController",
+            "onStreamDisconnected called, current state=$state, storage entry exists=${storage.load() != null}",
+        )
+        val entry =
+            storage.load() ?: run {
+                transition(State.FIRST_TIME)
+                return
+            }
         views.idleMacName.text = entry.macName
         views.idleMacIp.text = "${entry.host}:${entry.port}"
         transition(State.PAIRED_IDLE)
@@ -130,20 +141,26 @@ class WirelessTabController(
         when (error) {
             is StreamClient.WirelessConnectError.NetworkUnreachable -> {
                 views.repairTitle.text = "⚠ Couldn't reach Mac"
-                views.repairMessage.text = if (cached != null) {
-                    "No response from ${cached.macName} at ${cached.host}:${cached.port}.\n\nThe Mac may have switched WiFi networks, changed its port, or is not running. Open SideScreen on the Mac and scan the new QR to re-pair."
-                } else {
-                    "No response from your Mac. Make sure both devices are on the same WiFi and the Mac app is running, then scan the QR again."
-                }
+                views.repairMessage.text =
+                    if (cached != null) {
+                        "No response from ${cached.macName} at ${cached.host}:${cached.port}.\n\n" +
+                            "The Mac may have switched WiFi networks, changed its port, or is not " +
+                            "running. Open SideScreen on the Mac and scan the new QR to re-pair."
+                    } else {
+                        "No response from your Mac. Make sure both devices are on the same WiFi " +
+                            "and the Mac app is running, then scan the QR again."
+                    }
                 transition(State.REPAIR_NEEDED)
             }
             is StreamClient.WirelessConnectError.TokenRejected -> {
                 views.repairTitle.text = "⚠ Re-pair required"
-                views.repairMessage.text = if (cached != null) {
-                    "${cached.macName} reset its pairing token (e.g. Reset Token clicked, or reinstalled). Scan the new QR to pair again."
-                } else {
-                    "The Mac reset its pairing token. Scan the new QR to pair again."
-                }
+                views.repairMessage.text =
+                    if (cached != null) {
+                        "${cached.macName} reset its pairing token (e.g. Reset Token clicked, or " +
+                            "reinstalled). Scan the new QR to pair again."
+                    } else {
+                        "The Mac reset its pairing token. Scan the new QR to pair again."
+                    }
                 transition(State.REPAIR_NEEDED)
             }
             is StreamClient.WirelessConnectError.ProtocolError -> {
@@ -154,13 +171,19 @@ class WirelessTabController(
         }
     }
 
-    private fun showConnecting(title: String, subtitle: String) {
+    private fun showConnecting(
+        title: String,
+        subtitle: String,
+    ) {
         views.connectingLabel.text = title
         views.connectingSubtitle.text = subtitle
         transition(State.CONNECTING)
     }
 
-    fun onConnectSuccess(macName: String, ip: String) {
+    fun onConnectSuccess(
+        macName: String,
+        ip: String,
+    ) {
         views.connectedMacName.text = macName
         views.connectedMacIp.text = ip
         transition(State.CONNECTED)

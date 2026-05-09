@@ -116,7 +116,9 @@ class StreamClient(
 
     sealed class WirelessConnectError(msg: String) : Exception(msg) {
         object NetworkUnreachable : WirelessConnectError("Mac unreachable — check both on same WiFi")
+
         object TokenRejected : WirelessConnectError("Token rejected — re-pair required")
+
         object ProtocolError : WirelessConnectError("Connection error, please rescan QR")
     }
 
@@ -124,25 +126,29 @@ class StreamClient(
      * Wireless connect: opens TCP, performs auth handshake, then resumes the existing receive loop on success.
      * Throws WirelessConnectError on any failure.
      */
-    suspend fun connectWireless(token: ByteArray, deviceName: String) =
-        withContext(Dispatchers.IO) {
-            Log.i(TAG, "connectWireless: trying $host:$port (device=$deviceName, token bytes=${token.size})")
+    suspend fun connectWireless(
+        token: ByteArray,
+        deviceName: String,
+    ) = withContext(Dispatchers.IO) {
+        Log.i(TAG, "connectWireless: trying $host:$port (device=$deviceName, token bytes=${token.size})")
 
-            // Force the socket onto the active WiFi network. On some Android setups
-            // (especially LG/Android 12), an app's default outbound socket may take
-            // a route that silently drops LAN traffic; binding to the WIFI Network
-            // explicitly avoids that.
-            val s = try {
+        // Force the socket onto the active WiFi network. On some Android setups
+        // (especially LG/Android 12), an app's default outbound socket may take
+        // a route that silently drops LAN traffic; binding to the WIFI Network
+        // explicitly avoids that.
+        val s =
+            try {
                 val sock = Socket()
                 sock.tcpNoDelay = true
-                val wifiNetwork = context?.let { ctx ->
-                    val cm = ctx.getSystemService(ConnectivityManager::class.java)
-                    cm.allNetworks.firstOrNull { net ->
-                        val caps = cm.getNetworkCapabilities(net)
-                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
-                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                val wifiNetwork =
+                    context?.let { ctx ->
+                        val cm = ctx.getSystemService(ConnectivityManager::class.java)
+                        cm.allNetworks.firstOrNull { net ->
+                            val caps = cm.getNetworkCapabilities(net)
+                            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        }
                     }
-                }
                 if (wifiNetwork != null) {
                     Log.i(TAG, "connectWireless: binding socket to WiFi network $wifiNetwork")
                     wifiNetwork.bindSocket(sock)
@@ -155,62 +161,87 @@ class StreamClient(
                 Log.e(TAG, "connectWireless: TCP connect timeout to $host:$port (5s)")
                 throw WirelessConnectError.NetworkUnreachable
             } catch (e: IOException) {
-                Log.e(TAG, "connectWireless: TCP connect failed to $host:$port: ${e.javaClass.simpleName}: ${e.message}")
+                Log.e(
+                    TAG,
+                    "connectWireless: TCP connect failed to $host:$port: ${e.javaClass.simpleName}: ${e.message}",
+                )
                 throw WirelessConnectError.NetworkUnreachable
             }
-            Log.i(TAG, "connectWireless: TCP connected, sending handshake (${37 + deviceName.toByteArray().size} bytes)")
+        Log.i(
+            TAG,
+            "connectWireless: TCP connected, sending handshake (${37 + deviceName.toByteArray().size} bytes)",
+        )
 
-            val request = AuthHandshake.encodeRequest(token, deviceName)
+        val request = AuthHandshake.encodeRequest(token, deviceName)
+        try {
+            s.getOutputStream().write(request)
+            s.getOutputStream().flush()
+        } catch (e: IOException) {
             try {
-                s.getOutputStream().write(request)
-                s.getOutputStream().flush()
-            } catch (e: IOException) {
-                try { s.close() } catch (_: IOException) {}
-                throw WirelessConnectError.NetworkUnreachable
+                s.close()
+            } catch (_: IOException) {
             }
+            throw WirelessConnectError.NetworkUnreachable
+        }
 
-            val responseBuf = ByteArray(5)
-            var read = 0
+        val responseBuf = ByteArray(5)
+        var read = 0
+        try {
+            while (read < 5) {
+                val r = s.getInputStream().read(responseBuf, read, 5 - read)
+                if (r <= 0) break
+                read += r
+            }
+        } catch (e: IOException) {
             try {
-                while (read < 5) {
-                    val r = s.getInputStream().read(responseBuf, read, 5 - read)
-                    if (r <= 0) break
-                    read += r
+                s.close()
+            } catch (_: IOException) {
+            }
+            throw WirelessConnectError.NetworkUnreachable
+        }
+        if (read != 5) {
+            try {
+                s.close()
+            } catch (_: IOException) {
+            }
+            throw WirelessConnectError.ProtocolError
+        }
+
+        val status =
+            AuthHandshake.parseResponse(responseBuf) ?: run {
+                try {
+                    s.close()
+                } catch (_: IOException) {
                 }
-            } catch (e: IOException) {
-                try { s.close() } catch (_: IOException) {}
-                throw WirelessConnectError.NetworkUnreachable
-            }
-            if (read != 5) {
-                try { s.close() } catch (_: IOException) {}
                 throw WirelessConnectError.ProtocolError
             }
-
-            val status = AuthHandshake.parseResponse(responseBuf) ?: run {
-                try { s.close() } catch (_: IOException) {}
-                throw WirelessConnectError.ProtocolError
+        Log.i(TAG, "connectWireless: handshake response status=$status")
+        when (status) {
+            AuthHandshake.ResponseStatus.OK -> {
+                socket = s
+                inputStream = DataInputStream(java.io.BufferedInputStream(s.getInputStream(), 65536))
+                outputStream = java.io.DataOutputStream(s.getOutputStream())
+                isConnected = true
+                diagLog("Wireless connected to $host:$port")
+                onConnectionStatus?.invoke(true)
+                receiveData()
             }
-            Log.i(TAG, "connectWireless: handshake response status=$status")
-            when (status) {
-                AuthHandshake.ResponseStatus.OK -> {
-                    socket = s
-                    inputStream = DataInputStream(java.io.BufferedInputStream(s.getInputStream(), 65536))
-                    outputStream = java.io.DataOutputStream(s.getOutputStream())
-                    isConnected = true
-                    diagLog("Wireless connected to $host:$port")
-                    onConnectionStatus?.invoke(true)
-                    receiveData()
+            AuthHandshake.ResponseStatus.INVALID_TOKEN -> {
+                try {
+                    s.close()
+                } catch (_: IOException) {
                 }
-                AuthHandshake.ResponseStatus.INVALID_TOKEN -> {
-                    try { s.close() } catch (_: IOException) {}
-                    throw WirelessConnectError.TokenRejected
+                throw WirelessConnectError.TokenRejected
+            }
+            else -> {
+                try {
+                    s.close()
+                } catch (_: IOException) {
                 }
-                else -> {
-                    try { s.close() } catch (_: IOException) {}
-                    throw WirelessConnectError.ProtocolError
-                }
+                throw WirelessConnectError.ProtocolError
             }
         }
+    }
 
     private suspend fun receiveData() =
         withContext(Dispatchers.IO) {

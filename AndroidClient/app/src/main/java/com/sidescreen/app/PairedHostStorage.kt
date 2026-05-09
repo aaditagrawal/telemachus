@@ -32,11 +32,12 @@ class PairedHostStorage(context: Context) {
         val host = prefs.getString("host", null) ?: return null
         val port = prefs.getInt("port", -1).takeIf { it > 0 } ?: return null
         val tokenB64 = prefs.getString("token_b64", null) ?: return null
-        val token = try {
-            Base64.decode(tokenB64, Base64.NO_WRAP or Base64.NO_PADDING)
-        } catch (e: IllegalArgumentException) {
-            return null
-        }
+        val token =
+            try {
+                Base64.decode(tokenB64, Base64.NO_WRAP or Base64.NO_PADDING)
+            } catch (e: IllegalArgumentException) {
+                return null
+            }
         if (token.size != 32) return null
         val macName = prefs.getString("mac_name", null) ?: "Mac"
         return Entry(host, port, token, macName)

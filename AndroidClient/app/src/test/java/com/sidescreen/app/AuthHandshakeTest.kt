@@ -10,10 +10,11 @@ class AuthHandshakeTest {
     fun encodesGoldenBytes() {
         val token = ByteArray(32) { it.toByte() }
         val bytes = AuthHandshake.encodeRequest(token, "iPad Air")
-        val expected = byteArrayOf(0x53, 0x53, 0x57, 0x41) +
-            ByteArray(32) { it.toByte() } +
-            byteArrayOf(8) +
-            "iPad Air".toByteArray()
+        val expected =
+            byteArrayOf(0x53, 0x53, 0x57, 0x41) +
+                ByteArray(32) { it.toByte() } +
+                byteArrayOf(8) +
+                "iPad Air".toByteArray()
         assertArrayEquals(expected, bytes)
     }
 

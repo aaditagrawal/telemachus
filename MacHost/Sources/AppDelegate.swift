@@ -109,12 +109,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             pairedDeviceStore.upsert(name: name, lastConnected: Date())
         }
 
+        let port = Int(settings.port)
         Task.detached { [weak self] in
-            guard let self = self else { return }
-            let port = await self.settings.port
             let devices = StatusDetector.usbDevices()
-            let reverseOK = StatusDetector.adbReverseConfigured(port: Int(port))
-            await MainActor.run {
+            let reverseOK = StatusDetector.adbReverseConfigured(port: port)
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
                 self.settings.usbDeviceConnected = !devices.isEmpty
                 self.settings.adbReverseConfigured = reverseOK
             }
@@ -197,8 +197,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$connectionMode
             .dropFirst()
             .sink { [weak self] mode in
+                guard let self = self else { return }
                 Task { @MainActor in
-                    await self?.handleConnectionModeChange(to: mode)
+                    await self.handleConnectionModeChange(to: mode)
                 }
             }
             .store(in: &cancellables)
@@ -477,10 +478,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if settings.connectionMode == .wireless {
                 streamingServer?.expectedAuthToken = WirelessAuth.loadOrCreate()
                 streamingServer?.onWirelessClientPaired = { [weak self] deviceName in
+                    guard let self = self else { return }
                     Task { @MainActor in
-                        self?.currentWirelessDevice = deviceName
-                        self?.settings.currentWirelessDevice = deviceName
-                        self?.pairedDeviceStore.upsert(name: deviceName, lastConnected: Date())
+                        self.currentWirelessDevice = deviceName
+                        self.settings.currentWirelessDevice = deviceName
+                        self.pairedDeviceStore.upsert(name: deviceName, lastConnected: Date())
                     }
                 }
             }

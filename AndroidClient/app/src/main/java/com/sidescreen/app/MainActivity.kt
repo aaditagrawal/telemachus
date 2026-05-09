@@ -137,37 +137,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupWirelessController() {
-        wirelessController = WirelessTabController(
-            activity = this,
-            views = WirelessTabController.Views(
-                connecting = binding.wirelessConnecting,
-                firstTime = binding.wirelessFirstTime,
-                connected = binding.wirelessConnected,
-                pairedIdle = binding.wirelessPairedIdle,
-                repair = binding.wirelessTokenMismatch,
-                permDenied = binding.wirelessPermDenied,
-                scanButton = binding.wirelessScanButton,
-                rescanButton = binding.wirelessRescanButton,
-                disconnectButton = binding.wirelessDisconnectButton,
-                forgetButton = binding.wirelessForgetButton,
-                reconnectButton = binding.wirelessReconnectButton,
-                idleForgetButton = binding.wirelessIdleForgetButton,
-                openSettingsButton = binding.wirelessOpenSettingsButton,
-                connectedMacName = binding.connectedMacName,
-                connectedMacIp = binding.connectedMacIp,
-                connectingLabel = binding.connectingLabel,
-                connectingSubtitle = binding.connectingSubtitle,
-                idleMacName = binding.idleMacName,
-                idleMacIp = binding.idleMacIp,
-                repairTitle = binding.repairTitle,
-                repairMessage = binding.repairMessage,
-            ),
-            storage = pairedHostStorage,
-            cameraPerm = cameraPerm,
-            onConnectRequested = { host, port, token, deviceName, macName ->
-                connectWireless(host, port, token, deviceName, macName)
-            },
-        )
+        wirelessController =
+            WirelessTabController(
+                activity = this,
+                views =
+                    WirelessTabController.Views(
+                        connecting = binding.wirelessConnecting,
+                        firstTime = binding.wirelessFirstTime,
+                        connected = binding.wirelessConnected,
+                        pairedIdle = binding.wirelessPairedIdle,
+                        repair = binding.wirelessTokenMismatch,
+                        permDenied = binding.wirelessPermDenied,
+                        scanButton = binding.wirelessScanButton,
+                        rescanButton = binding.wirelessRescanButton,
+                        disconnectButton = binding.wirelessDisconnectButton,
+                        forgetButton = binding.wirelessForgetButton,
+                        reconnectButton = binding.wirelessReconnectButton,
+                        idleForgetButton = binding.wirelessIdleForgetButton,
+                        openSettingsButton = binding.wirelessOpenSettingsButton,
+                        connectedMacName = binding.connectedMacName,
+                        connectedMacIp = binding.connectedMacIp,
+                        connectingLabel = binding.connectingLabel,
+                        connectingSubtitle = binding.connectingSubtitle,
+                        idleMacName = binding.idleMacName,
+                        idleMacIp = binding.idleMacIp,
+                        repairTitle = binding.repairTitle,
+                        repairMessage = binding.repairMessage,
+                    ),
+                storage = pairedHostStorage,
+                cameraPerm = cameraPerm,
+                onConnectRequested = { host, port, token, deviceName, macName ->
+                    connectWireless(host, port, token, deviceName, macName)
+                },
+            )
         wirelessController.bind()
         binding.wirelessDisconnectButton.setOnClickListener { disconnect() }
         if (prefs.connectionMode == ConnectionMode.WIRELESS) {
@@ -175,7 +177,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: android.content.Intent?,
+    ) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == WirelessTabController.REQ_SCAN && resultCode == RESULT_OK) {
             val url = data?.getStringExtra(QRScannerActivity.EXTRA_URL) ?: return
@@ -183,7 +189,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == WirelessTabController.REQ_CAMERA) {
             val granted = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -850,7 +860,11 @@ class MainActivity : AppCompatActivity() {
                     binding.settingsButton.visibility = View.GONE
                     binding.statusBar.visibility = View.GONE
                     val mode = prefs.connectionMode
-                    android.util.Log.i("MainActivity", "onConnectionStatus(false) — mode=$mode, will transition wirelessController=${mode == ConnectionMode.WIRELESS}")
+                    val willTransition = mode == ConnectionMode.WIRELESS
+                    android.util.Log.i(
+                        "MainActivity",
+                        "onConnectionStatus(false) — mode=$mode, willTransition=$willTransition",
+                    )
                     if (mode == ConnectionMode.WIRELESS) {
                         // Don't restart checklist (it conflicts with wireless on Mac).
                         // Tell wireless controller to show the idle/reconnect UI.
@@ -898,7 +912,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun connectWireless(host: String, port: Int, token: ByteArray, deviceName: String, macName: String) {
+    private fun connectWireless(
+        host: String,
+        port: Int,
+        token: ByteArray,
+        deviceName: String,
+        macName: String,
+    ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 log("Connecting wirelessly to $host:$port...")

@@ -11,7 +11,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class CameraPermissionManager(private val activity: Activity) {
-
     fun isGranted(): Boolean =
         ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
@@ -30,9 +29,10 @@ class CameraPermissionManager(private val activity: Activity) {
     }
 
     fun openAppSettings() {
-        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", activity.packageName, null)
-        }
+        val intent =
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", activity.packageName, null)
+            }
         activity.startActivity(intent)
     }
 

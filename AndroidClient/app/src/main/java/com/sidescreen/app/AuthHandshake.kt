@@ -20,7 +20,10 @@ object AuthHandshake {
      * Build the wire format request:
      *   [magic 4][token 32][name_len 1][name N]
      */
-    fun encodeRequest(token: ByteArray, deviceName: String): ByteArray {
+    fun encodeRequest(
+        token: ByteArray,
+        deviceName: String,
+    ): ByteArray {
         require(token.size == 32) { "token must be 32 bytes, got ${token.size}" }
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         require(nameBytes.size in 1..64) { "deviceName UTF-8 length must be 1..64, got ${nameBytes.size}" }
