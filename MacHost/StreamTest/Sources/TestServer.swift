@@ -82,6 +82,7 @@ class TestServer {
             case .failed, .cancelled:
                 print("[INFO] Client disconnected")
                 self?.isClientConnected = false
+                self?.clientConnectedCallbackSent = false
                 self?.isReceiving = false
                 self?.inputBuffer.removeAll(keepingCapacity: true)
                 self?.onClientDisconnected?()
@@ -93,9 +94,9 @@ class TestServer {
 
     private func finishClientStartup(on conn: NWConnection) {
         guard connection === conn, isClientConnected, !clientConnectedCallbackSent else { return }
-        clientConnectedCallbackSent = true
         print("[OK] Frame metadata: \(clientSupportsFrameMetadata ? "enabled" : "legacy")")
         onClientConnected?()
+        clientConnectedCallbackSent = true
     }
 
     private func startReceivingInput(on conn: NWConnection) {
@@ -185,10 +186,11 @@ class TestServer {
 
     /// Send a video frame (same protocol as SideScreen)
     func sendFrame(_ data: Data, isKeyframe: Bool) {
-        guard let connection = connection, isClientConnected else { return }
+        guard let connection = connection, isClientConnected, clientConnectedCallbackSent else { return }
 
         sendQueue.async { [weak self] in
             guard let self = self else { return }
+            guard self.isClientConnected, self.clientConnectedCallbackSent else { return }
 
             // Simple backpressure - but NEVER drop keyframes
             if !isKeyframe && !self.canSendNext {
