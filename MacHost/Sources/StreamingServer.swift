@@ -64,7 +64,6 @@ class StreamingServer {
     private var connectionReady = false
     private var waitingForSyncFrame = false
     private var clientSupportsFrameMetadata = false
-    private var protocolStarted = false
     private var inputBuffer = Data()
 
     init(port: UInt16) {
@@ -117,7 +116,6 @@ class StreamingServer {
 
         connectionReady = false
         clientSupportsFrameMetadata = false
-        protocolStarted = false
         waitingForSyncFrame = true
         inputBuffer.removeAll(keepingCapacity: true)
         connection = newConnection
@@ -170,9 +168,8 @@ class StreamingServer {
     }
 
     private func finishProtocolStartup(on conn: NWConnection) {
-        guard connection === conn, !isStopped, !protocolStarted else { return }
+        guard connection === conn, !isStopped, !connectionReady else { return }
 
-        protocolStarted = true
         debugLog("Client connected - sending display config first")
         sendDisplaySize()
         connectionReady = true
@@ -425,27 +422,7 @@ class StreamingServer {
         frameQueue.async { [weak self] in
             guard let self = self else { return }
 
-            let packet: Data
-            if self.clientSupportsFrameMetadata {
-                var metadataPacket = Data(capacity: data.count + 14)
-                metadataPacket.append(WireMessage.videoFrameWithMetadata)
-                var frameSize = Int32(data.count).bigEndian
-                withUnsafeBytes(of: &frameSize) { metadataPacket.append(contentsOf: $0) }
-                metadataPacket.append(isKeyframe ? 1 : 0)
-                var captureTimestamp = timestamp.bigEndian
-                withUnsafeBytes(of: &captureTimestamp) { metadataPacket.append(contentsOf: $0) }
-                metadataPacket.append(data)
-                packet = metadataPacket
-            } else {
-                // Keep legacy frame type 0 for clients that do not advertise
-                // metadata support; remove after legacy clients age out.
-                var legacyPacket = Data(capacity: data.count + 5)
-                legacyPacket.append(WireMessage.legacyVideoFrame)
-                var frameSize = Int32(data.count).bigEndian
-                withUnsafeBytes(of: &frameSize) { legacyPacket.append(contentsOf: $0) }
-                legacyPacket.append(data)
-                packet = legacyPacket
-            }
+            let packet = self.makeFramePacket(data, timestamp: timestamp, isKeyframe: isKeyframe)
 
             connection.send(content: packet, completion: .contentProcessed { error in
                 if error != nil {
@@ -457,6 +434,32 @@ class StreamingServer {
             let sendAge = DispatchTime.now().uptimeNanoseconds - timestamp
             self.updateStats(bytes: data.count, frameAgeNs: sendAge)
         }
+    }
+
+    private func makeFramePacket(_ data: Data, timestamp: UInt64, isKeyframe: Bool) -> Data {
+        if clientSupportsFrameMetadata {
+            var packet = Data(capacity: data.count + 14)
+            packet.append(WireMessage.videoFrameWithMetadata)
+            appendFrameSize(data.count, to: &packet)
+            packet.append(isKeyframe ? 1 : 0)
+            var captureTimestamp = timestamp.bigEndian
+            withUnsafeBytes(of: &captureTimestamp) { packet.append(contentsOf: $0) }
+            packet.append(data)
+            return packet
+        }
+
+        // Keep legacy frame type 0 for clients that do not advertise
+        // metadata support; remove after legacy clients age out.
+        var packet = Data(capacity: data.count + 5)
+        packet.append(WireMessage.legacyVideoFrame)
+        appendFrameSize(data.count, to: &packet)
+        packet.append(data)
+        return packet
+    }
+
+    private func appendFrameSize(_ size: Int, to packet: inout Data) {
+        var frameSize = Int32(size).bigEndian
+        withUnsafeBytes(of: &frameSize) { packet.append(contentsOf: $0) }
     }
 
     // Pipeline profiling: track frame age at send time
