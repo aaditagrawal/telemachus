@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="0.8.1"></a>
+## [0.8.1] - 2026-05-12
+
+Small fix on top of the 0.8.0 wireless release. Wireless mode (QR pairing, auto-reconnect, paired-devices management) and everything else from 0.8.0 stay the same — this patch only fixes a UI bug in the Mac Status section.
+
+### Fixed
+- **Info tooltips next to status rows now show their hint text.** Clicking the `ⓘ` icon next to a status row previously opened an empty horizontal bar instead of the explanation. Now it pops up the hint properly (e.g. what "ADB reverse" or "Listening on" actually mean).
+
+### Installation
+- **macOS**: Open `SideScreen-0.8.1-mac-universal.dmg`, drag SideScreen to Applications. If Gatekeeper says "damaged"/"cannot be opened": `sudo xattr -cr /Applications/SideScreen.app`
+- **Android**: APK from 0.8.0 still works — no Android changes in this release. Otherwise install `SideScreen-0.8.1-android.apk` (enable "Unknown sources" if needed).
+
+---
+
 <a id="0.8.0"></a>
 ## [0.8.0] - 2026-05-09
 

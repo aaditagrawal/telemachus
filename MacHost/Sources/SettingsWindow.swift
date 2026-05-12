@@ -856,9 +856,10 @@ struct StatusRow: View {
                 .popover(isPresented: $showHint, arrowEdge: .top) {
                     Text(hint)
                         .font(.system(size: 12))
-                        .padding(10)
-                        .frame(maxWidth: 320, alignment: .leading)
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 280, alignment: .leading)
+                        .padding(12)
                 }
             }
             Spacer()
