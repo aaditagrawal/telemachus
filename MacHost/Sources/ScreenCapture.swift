@@ -119,6 +119,20 @@ class ScreenCapture {
         return ScreenCapture.physicalSize(for: id).height
     }
 
+    /// Codec for the current encode session. Switching restarts the stream.
+    private(set) var codec: StreamCodec = .hevc
+
+    /// Encode dimensions for a codec: physical display pixels, clamped to the
+    /// AVC decoder limit when streaming H.264. SCStream/CGDisplayStream scale
+    /// the capture into this size, so no virtual-display change is needed.
+    func encodeSize(for codec: StreamCodec) -> (width: Int, height: Int) {
+        let phys = (displayWidth, displayHeight)
+        switch codec {
+        case .hevc: return phys
+        case .h264: return CodecLimits.clampForAvc(width: phys.0, height: phys.1)
+        }
+    }
+
     /// Returns physical pixel dimensions for a display ID.
     /// CGDisplayPixelsWide/High return logical pixels on HiDPI displays — use
     /// CGDisplayModeGetPixelWidth/Height to always get the true physical size.
@@ -207,13 +221,13 @@ class ScreenCapture {
     // MARK: - Stream setup
 
     private func setupStream() async throws {
-        guard let display = display, let virtualDisplayID = virtualDisplayID else {
+        guard let display = display, virtualDisplayID != nil else {
             throw NSError(domain: "ScreenCapture", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Display not initialized"])
         }
 
-        // Use physical pixels so the encoder captures at full Retina resolution on HiDPI
-        let (width, height) = ScreenCapture.physicalSize(for: virtualDisplayID)
+        // Physical pixels for full Retina sharpness, clamped when H.264 (SCStream scales)
+        let (width, height) = encodeSize(for: codec)
         let fps = refreshRate
 
         streamOutput = StreamOutput()
@@ -310,10 +324,9 @@ class ScreenCapture {
         currentGamingBoost = gamingBoost
         currentFrameRate = frameRate
 
-        let width = displayWidth
-        let height = displayHeight
+        let (width, height) = encodeSize(for: codec)
 
-        encoder = VideoEncoder(width: width, height: height, bitrateMbps: bitrateMbps, quality: quality, gamingBoost: gamingBoost, frameRate: frameRate)
+        encoder = VideoEncoder(width: width, height: height, codec: codec, bitrateMbps: bitrateMbps, quality: quality, gamingBoost: gamingBoost, frameRate: frameRate)
         encoder?.onEncodedFrame = { [weak server] data, timestamp, isKeyframe in
             server?.sendFrame(data, timestamp: timestamp, isKeyframe: isKeyframe)
         }
@@ -474,8 +487,9 @@ class ScreenCapture {
             streamDelegate = nil
         }
 
-        // Use physical pixels — CGDisplayPixelsWide/High return logical on HiDPI displays
-        let (width, height) = ScreenCapture.physicalSize(for: displayID)
+        // CGDisplayStream scales natively via outputWidth/Height, so the
+        // AVC clamp applies here exactly as in the SCStream path.
+        let (width, height) = encodeSize(for: codec)
 
         debugLog("CGDisplayStream fallback — display \(displayID) (\(width)x\(height))")
 
@@ -530,6 +544,33 @@ class ScreenCapture {
 
     func updateEncoderSettings(bitrateMbps: Int, quality: String, gamingBoost: Bool) {
         encoder?.updateSettings(bitrateMbps: bitrateMbps, quality: quality, gamingBoost: gamingBoost)
+    }
+
+    /// Switch the wire codec. No-op when unchanged. When changed mid-stream,
+    /// rebuilds the encoder at the codec's encode size and restarts capture so
+    /// SCStream delivers buffers at the (possibly clamped) dimensions. The
+    /// client's keyframe-request loop (force, 200 ms interval) bridges the
+    /// restart gap — the decoder drops frames until the first new keyframe.
+    /// Note: if the CGDisplayStream fallback is active, restartStream() only
+    /// rebuilds the SCStream path; the rare fallback+codec-switch combination
+    /// recovers on the next fallback restart rather than immediately.
+    func setCodec(_ newCodec: StreamCodec) {
+        guard newCodec != codec else { return }
+        debugLog("Switching stream codec: \(codec) -> \(newCodec)")
+        codec = newCodec
+
+        guard encoder != nil else { return }  // not streaming yet; startStreaming will pick it up
+
+        let (width, height) = encodeSize(for: newCodec)
+        let server = currentServer
+        let newEncoder = VideoEncoder(width: width, height: height, codec: newCodec, bitrateMbps: currentBitrateMbps, quality: currentQuality, gamingBoost: currentGamingBoost, frameRate: currentFrameRate)
+        newEncoder.onEncodedFrame = { [weak server] data, timestamp, isKeyframe in
+            server?.sendFrame(data, timestamp: timestamp, isKeyframe: isKeyframe)
+        }
+        newEncoder.requestKeyframe()
+        encoder = newEncoder
+
+        restartStream()
     }
 
     // MARK: - Stop streaming
