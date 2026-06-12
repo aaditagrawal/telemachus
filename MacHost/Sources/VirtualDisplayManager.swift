@@ -3,7 +3,6 @@ import CoreGraphics
 import CGVirtualDisplayBridge
 
 /// Manages virtual display creation and lifecycle using CGVirtualDisplay API
-@available(macOS 14.0, *)
 class VirtualDisplayManager {
     private var virtualDisplay: CGVirtualDisplay?
     private var displayDescriptor: CGVirtualDisplayDescriptor?

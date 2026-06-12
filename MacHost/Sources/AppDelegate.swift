@@ -45,7 +45,6 @@ struct GestureThresholds {
     static let minTouchInterval: UInt64 = 8_000_000    // ~120Hz
 }
 
-@available(macOS 14.0, *)
 class AppDelegate: NSObject, NSApplicationDelegate {
     var streamingServer: StreamingServer?
     var screenCapture: ScreenCapture?

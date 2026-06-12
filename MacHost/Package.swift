@@ -4,7 +4,10 @@ import PackageDescription
 let package = Package(
     name: "SideScreen",
     platforms: [
-        .macOS(.v14)  // Required for CGVirtualDisplay API
+        // Floor is ScreenCaptureKit basics (12.3) + OSAllocatedUnfairLock /
+        // SCStreamConfiguration.capturesAudio (13.0). CGVirtualDisplay is a
+        // private API present well before 13 — it does NOT require 14.
+        .macOS(.v13)
     ],
     products: [
         .executable(

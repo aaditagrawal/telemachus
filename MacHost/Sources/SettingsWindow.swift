@@ -3,7 +3,6 @@ import SwiftUI
 
 // MARK: - Frosted GroupBox Component
 
-@available(macOS 14.0, *)
 struct FrostedGroupBox<Content: View, Trailing: View>: View {
     let title: String
     var icon: String?
@@ -38,7 +37,6 @@ struct FrostedGroupBox<Content: View, Trailing: View>: View {
     }
 }
 
-@available(macOS 14.0, *)
 extension FrostedGroupBox where Trailing == EmptyView {
     init(title: String, icon: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -50,7 +48,6 @@ extension FrostedGroupBox where Trailing == EmptyView {
 
 // MARK: - Visual Effect Blur
 
-@available(macOS 14.0, *)
 struct VisualEffectBlur: NSViewRepresentable {
     var material: NSVisualEffectView.Material
     var blendingMode: NSVisualEffectView.BlendingMode
@@ -73,7 +70,6 @@ struct VisualEffectBlur: NSViewRepresentable {
 
 // MARK: - Settings View
 
-@available(macOS 14.0, *)
 struct SettingsView: View {
     @ObservedObject var settings: DisplaySettings
     @State private var showPermissionAlert = false
@@ -829,7 +825,6 @@ struct SettingsView: View {
 
 // MARK: - Supporting Views
 
-@available(macOS 14.0, *)
 struct StatusRow: View {
     let title: String
     let status: String
@@ -875,7 +870,6 @@ struct StatusRow: View {
     }
 }
 
-@available(macOS 14.0, *)
 struct ResolutionRow: View {
     let resolution: String
     let isSelected: Bool
@@ -904,7 +898,6 @@ struct ResolutionRow: View {
     }
 }
 
-@available(macOS 14.0, *)
 struct BitrateButton: View {
     let label: String
     let value: Int
@@ -943,7 +936,6 @@ struct BitrateButton: View {
     }
 }
 
-@available(macOS 14.0, *)
 struct RotationButton: View {
     let degrees: Int
     let label: String
@@ -988,7 +980,6 @@ struct RotationButton: View {
 
 // MARK: - Display Settings
 
-@available(macOS 14.0, *)
 class DisplaySettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let keyPrefix = "SideScreen_"
@@ -1173,7 +1164,6 @@ class DisplaySettings: ObservableObject {
 
 // MARK: - Window Controller
 
-@available(macOS 14.0, *)
 class SettingsWindowController: NSWindowController, NSWindowDelegate {
     convenience init(settings: DisplaySettings) {
         let window = ConstrainedWindow(
@@ -1222,7 +1212,6 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-@available(macOS 14.0, *)
 class ConstrainedWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         guard let screen = screen ?? self.screen ?? NSScreen.main else {
@@ -1252,7 +1241,6 @@ class ConstrainedWindow: NSWindow {
 
 // MARK: - Wireless Section
 
-@available(macOS 14.0, *)
 struct WirelessSection: View {
     @ObservedObject var settings: DisplaySettings
     let pairedDeviceStore: PairedDeviceStore
@@ -1368,7 +1356,9 @@ struct WirelessSection: View {
             refreshPaired()
             nowTick = Date()
         }
-        .onChange(of: settings.port) { _, _ in refreshQR() }
+        // One-parameter onChange: deprecated on macOS 14 SDKs (warning only)
+        // but required to run on macOS 13.
+        .onChange(of: settings.port) { _ in refreshQR() }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { now in
             nowTick = now
             refreshPaired()
