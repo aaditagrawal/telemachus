@@ -10,6 +10,13 @@ private enum WireMessage {
     static let videoFrameWithMetadata: UInt8 = 6
     static let keyframeRequest: UInt8 = 7
     static let clientSupportsFrameMetadata: UInt8 = 8
+    /// Client→server, payload-free (old hosts consume 1 byte safely):
+    /// "this device has no HEVC decoder".
+    static let clientAvcOnly: UInt8 = 9
+    /// Server→client, 1-byte payload (StreamCodec.wireId). Sent ONLY to
+    /// clients that sent clientAvcOnly — old clients disconnect on unknown
+    /// message types, so this must never be sent unsolicited.
+    static let codecSelected: UInt8 = 10
 }
 
 private extension NWEndpoint {
@@ -34,6 +41,10 @@ class StreamingServer {
     private var connection: NWConnection?
     var onClientConnected: (() -> Void)?
     var onClientDisconnected: (() -> Void)?
+    /// Fired once per connection during protocol startup, BEFORE the display
+    /// config is sent, for every outcome (.hevc or .h264) — so the capture
+    /// pipeline can also revert to HEVC after an AVC-only client goes away.
+    var onCodecNegotiated: ((StreamCodec) -> Void)?
     // Touch callback: (x1, y1, action, pointerCount, x2, y2)
     var onTouchEvent: ((Float, Float, Int, Int, Float, Float) -> Void)?
     var onStats: ((Double, Double) -> Void)?
@@ -64,6 +75,7 @@ class StreamingServer {
     private var connectionReady = false
     private var waitingForSyncFrame = false
     private var clientSupportsFrameMetadata = false
+    private var clientIsAvcOnly = false
     private var inputBuffer = Data()
 
     init(port: UInt16) {
@@ -116,6 +128,7 @@ class StreamingServer {
 
         connectionReady = false
         clientSupportsFrameMetadata = false
+        clientIsAvcOnly = false
         waitingForSyncFrame = true
         inputBuffer.removeAll(keepingCapacity: true)
         connection = newConnection
@@ -170,10 +183,24 @@ class StreamingServer {
     private func finishProtocolStartup(on conn: NWConnection) {
         guard connection === conn, !isStopped, !connectionReady else { return }
 
+        let codec: StreamCodec = clientIsAvcOnly ? .h264 : .hevc
+        if clientIsAvcOnly {
+            // Safe to send: this client opted in via type 9. Must precede the
+            // display config so the client knows the codec before it sizes
+            // and configures its decoder.
+            let msg = Data([WireMessage.codecSelected, codec.wireId])
+            conn.send(content: msg, completion: .contentProcessed { _ in })
+            debugLog("Sent codecSelected: H.264")
+        }
+        // Synchronous, before sendDisplaySize(): the handler switches the
+        // encoder AND updates displayWidth/Height (clamped for H.264) so the
+        // display config below carries decoder-safe dimensions.
+        onCodecNegotiated?(codec)
+
         debugLog("Client connected - sending display config first")
         sendDisplaySize()
         connectionReady = true
-        debugLog("Connection ready for frames (metadata=\(clientSupportsFrameMetadata ? "on" : "off"))")
+        debugLog("Connection ready for frames (metadata=\(clientSupportsFrameMetadata ? "on" : "off"), codec=\(codec))")
         onClientConnected?()
     }
 
@@ -367,6 +394,16 @@ class StreamingServer {
                     debugLog("Client supports video frame metadata")
                 }
                 finishProtocolStartup(on: connection)
+
+            case WireMessage.clientAvcOnly:
+                // Payload-free opt-in (same convention as type 8): the client
+                // has no HEVC decoder, stream H.264 instead. Clients send this
+                // BEFORE type 8, so it lands before finishProtocolStartup runs.
+                consumeInputBytes(1)
+                if !clientIsAvcOnly {
+                    clientIsAvcOnly = true
+                    debugLog("Client is AVC-only — will negotiate H.264")
+                }
 
             default:
                 debugLog("Unknown client input type: \(msgType)")
