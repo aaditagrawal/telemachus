@@ -18,6 +18,7 @@ class VideoDecoder(
     private val display: Display? = null,
     initialWidth: Int = 1920,
     initialHeight: Int = 1200,
+    private val mime: String = MediaFormat.MIMETYPE_VIDEO_HEVC,
 ) {
     private var decoder: MediaCodec? = null
     private var decoderThread: HandlerThread? = null
@@ -88,7 +89,7 @@ class VideoDecoder(
             if (decoderName != null) {
                 MediaCodec.createByCodecName(decoderName)
             } else {
-                MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
+                MediaCodec.createDecoderByType(mime)
             }
 
         val callback =
@@ -129,7 +130,7 @@ class VideoDecoder(
 
         val format =
             MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_HEVC,
+                mime,
                 currentWidth,
                 currentHeight,
             )
@@ -156,7 +157,7 @@ class VideoDecoder(
             try {
                 val basicFormat =
                     MediaFormat.createVideoFormat(
-                        MediaFormat.MIMETYPE_VIDEO_HEVC,
+                        mime,
                         currentWidth,
                         currentHeight,
                     )
@@ -177,7 +178,7 @@ class VideoDecoder(
             try {
                 val minimalFormat =
                     MediaFormat.createVideoFormat(
-                        MediaFormat.MIMETYPE_VIDEO_HEVC,
+                        mime,
                         currentWidth,
                         currentHeight,
                     )
@@ -206,7 +207,7 @@ class VideoDecoder(
     }
 
     /**
-     * Find the best HEVC decoder for the given resolution.
+     * Find the best decoder for [mime] at the given resolution.
      * Prefers hardware decoders, falls back to software if HW can't handle the resolution.
      * Returns codec name to use with MediaCodec.createByCodecName(), or null for default.
      */
@@ -226,7 +227,7 @@ class VideoDecoder(
                 if (info.isEncoder) continue
                 val caps =
                     try {
-                        info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_HEVC)
+                        info.getCapabilitiesForType(mime)
                     } catch (_: Exception) {
                         continue
                     }
@@ -245,7 +246,7 @@ class VideoDecoder(
                         }
 
                 diagLog(
-                    "HEVC decoder '${info.name}': " +
+                    "$mime decoder '${info.name}': " +
                         "width=${videoCaps.supportedWidths}, " +
                         "height=${videoCaps.supportedHeights}, " +
                         "hw=$isHardware, supports ${width}x$height=$supported, " +
