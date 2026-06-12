@@ -75,6 +75,11 @@ struct SettingsView: View {
     @State private var showPermissionAlert = false
     @State private var showResetConfirmation = false
     @State private var headerHovered = false
+    // Plain strings for the custom resolution fields: TextField(value:format:)
+    // only commits on Return/focus-loss, so clicking Apply read stale values,
+    // and .number formatting injected locale grouping separators ("1,200").
+    @State private var customWidthText = ""
+    @State private var customHeightText = ""
 
     var body: some View {
         ZStack {
@@ -251,19 +256,29 @@ struct SettingsView: View {
 
                                     if settings.showAllResolutions {
                                         HStack(spacing: 8) {
-                                            TextField("W", value: $settings.customWidth, format: .number)
+                                            TextField("W", text: $customWidthText)
                                                 .textFieldStyle(.roundedBorder)
                                                 .frame(width: 70)
                                             Text("x")
                                                 .foregroundColor(.secondary)
-                                            TextField("H", value: $settings.customHeight, format: .number)
+                                            TextField("H", text: $customHeightText)
                                                 .textFieldStyle(.roundedBorder)
                                                 .frame(width: 70)
                                             Button("Apply") {
+                                                guard let w = Int(customWidthText.trimmingCharacters(in: .whitespaces)),
+                                                      let h = Int(customHeightText.trimmingCharacters(in: .whitespaces)) else { return }
+                                                settings.customWidth = w
+                                                settings.customHeight = h
                                                 settings.applyCustomResolution()
                                             }
                                             .buttonStyle(.bordered)
                                             .controlSize(.small)
+                                            .disabled(Int(customWidthText.trimmingCharacters(in: .whitespaces)) == nil ||
+                                                      Int(customHeightText.trimmingCharacters(in: .whitespaces)) == nil)
+                                        }
+                                        .onAppear {
+                                            customWidthText = String(settings.customWidth)
+                                            customHeightText = String(settings.customHeight)
                                         }
                                     }
                                 }
