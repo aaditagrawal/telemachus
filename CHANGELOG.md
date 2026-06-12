@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="0.10.0"></a>
+## [0.10.0] - 2026-06-12
+
+Compatibility release: H.264 fallback for tablets that have no HEVC decoder (e-ink devices like the Onyx Boox line), macOS 13 Ventura support for older Intel Macs, and a custom-resolution Apply that actually applies.
+
+### Added
+- **H.264 fallback for devices without an HEVC decoder.** Side Screen streamed HEVC only, so tablets whose firmware ships no HEVC decoder (e.g. Onyx Boox Nova Air C) connected fine but showed a black screen — frames arrived, nothing could decode them. The Android client now probes `MediaCodecList` once at connect and, when HEVC is missing, advertises it to the Mac, which switches the encoder to H.264 (Main profile) and clamps the encode resolution to the 1920×1088 floor that every AVC hardware decoder meets — preserving aspect ratio, 16-aligned. Devices with HEVC keep streaming HEVC exactly as before; the fallback only activates where today there was nothing. Thanks to Devin Lange for the report and the adb diagnostics that pinned the root cause.
+- **macOS 13 (Ventura) support.** The deployment target dropped from macOS 14 to 13, so 2017+ Intel Macs stuck on Ventura can run the host. The binary was already universal (arm64 + x86_64); only one macOS 14-only API stood in the way. App-bundle metadata (`LSMinimumSystemVersion`) now matches. Heads-up: ScreenCaptureKit and the virtual-display private API are less battle-tested on 13 — reports welcome.
+
+### Fixed
+- **Custom resolution "Apply" did nothing.** Three stacked bugs: the W/H fields only committed their text when you pressed Return (clicking Apply read stale values, and locale formatting injected grouping separators like "1.920"); nothing listened for resolution changes while the server ran, so even a committed change sat idle until a manual stop/start; and out-of-range values were rejected silently. Now Apply reads exactly what you typed, the server restarts itself (~2 s, the tablet reconnects) whenever the resolution changes mid-run — picker rows included — the applied custom value shows up highlighted in the resolution list, and out-of-range input disables Apply and shows the supported range (640–7680 × 480–4320).
+
+### Notes
+- Two new wire-protocol messages (`9` client-is-AVC-only, `10` codec-selected), both strictly opt-in: an old Mac safely ignores type 9 (payload-free by design), and type 10 is only ever sent to clients that asked. Every mixed old/new pairing on HEVC-capable devices behaves byte-identically to 0.9.1. The one combination that still can't stream — AVC-only tablet against an old Mac — now shows "update the Mac app" on the tablet instead of a silent black screen. Update both sides to get the fallback.
+- H.264 is a less efficient codec than HEVC; on AVC-only devices expect the clamped resolution (e.g. a 1872×1404 panel streams at 1440×1088) and slightly softer text than an HEVC device would get. That trade buys a working screen on hardware that previously had none.
+
+### Installation
+- **macOS**: Open `SideScreen-0.10.0-mac-universal.dmg`, drag SideScreen to Applications. If Gatekeeper says "damaged"/"cannot be opened": `sudo xattr -cr /Applications/SideScreen.app`. Now requires macOS 13 (Ventura) or later — was 14.
+- **Android**: Install `SideScreen-0.10.0-android.apk` (enable "Unknown sources" if needed).
+
+---
+
 <a id="0.9.1"></a>
 ## [0.9.1] - 2026-05-18
 
