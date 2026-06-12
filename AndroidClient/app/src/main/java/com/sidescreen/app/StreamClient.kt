@@ -35,6 +35,17 @@ class StreamClient(
     var onDisplaySize: ((Int, Int, Int) -> Unit)? = null // width, height, rotation
     var onStats: ((Double, Double) -> Unit)? = null
 
+    /** Invoked when the server confirms the stream codec (true = HEVC). */
+    var onCodecSelected: ((Boolean) -> Unit)? = null
+
+    /** Stream codec for sync-frame parsing. HEVC unless the server says otherwise. */
+    @Volatile var streamCodecIsHevc = true
+        private set
+
+    /** True once a MESSAGE_CODEC_SELECTED arrived — distinguishes new Macs from old. */
+    @Volatile var codecNegotiated = false
+        private set
+
     private var bytesReceived = 0L
     private var framesReceived = 0L
     private var diagFrameCount = 0L
@@ -113,6 +124,9 @@ class StreamClient(
                     }
                 inputStream = DataInputStream(java.io.BufferedInputStream(socket?.getInputStream(), 65536))
                 outputStream = java.io.DataOutputStream(socket?.getOutputStream())
+                streamCodecIsHevc = true
+                codecNegotiated = false
+                advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
                 isConnected = true
                 lastKeyframeReceivedNs = 0L
@@ -238,6 +252,9 @@ class StreamClient(
                 socket = s
                 inputStream = DataInputStream(java.io.BufferedInputStream(s.getInputStream(), 65536))
                 outputStream = java.io.DataOutputStream(s.getOutputStream())
+                streamCodecIsHevc = true
+                codecNegotiated = false
+                advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
                 isConnected = true
                 diagLog("Wireless connected to $host:$port")
@@ -266,6 +283,15 @@ class StreamClient(
             out.writeByte(MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA)
             out.flush()
             diagLog("Advertised frame metadata support")
+        }
+    }
+
+    private fun advertiseAvcOnlyIfNeeded() {
+        if (CodecCapabilities.hasHevcDecoder) return
+        outputStream?.let { out ->
+            out.writeByte(MESSAGE_CLIENT_AVC_ONLY)
+            out.flush()
+            diagLog("Advertised AVC-only (no HEVC decoder on this device)")
         }
     }
 
@@ -300,6 +326,14 @@ class StreamClient(
                             val sentTime = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN).long
                             val rtt = (System.nanoTime() - sentTime) / 1_000_000.0 // ms
                             onLatencyMeasured?.invoke(rtt)
+                        }
+
+                        MESSAGE_CODEC_SELECTED -> {
+                            val codecId = input.readByte().toInt()
+                            streamCodecIsHevc = codecId == 0
+                            codecNegotiated = true
+                            diagLog("Server selected codec: ${if (streamCodecIsHevc) "HEVC" else "H.264"}")
+                            onCodecSelected?.invoke(streamCodecIsHevc)
                         }
 
                         else -> {
@@ -455,7 +489,7 @@ class StreamClient(
         input.readFully(frameData, 0, frameSize)
 
         if (!hasMetadata && !isKeyframe) {
-            isKeyframe = isHevcSyncFrame(frameData, frameSize)
+            isKeyframe = isSyncFrame(frameData, frameSize, streamCodecIsHevc)
         }
 
         // Capture timestamp after full frame received for accurate age tracking.
@@ -545,12 +579,21 @@ class StreamClient(
         private const val MESSAGE_VIDEO_FRAME_WITH_METADATA = 6
         private const val MESSAGE_KEYFRAME_REQUEST = 7
         private const val MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA = 8
+        private const val MESSAGE_CLIENT_AVC_ONLY = 9
+        private const val MESSAGE_CODEC_SELECTED = 10
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 
-        private fun isHevcSyncFrame(
+        /**
+         * Codec-aware sync-frame (keyframe) detection on the legacy
+         * MESSAGE_VIDEO_FRAME path. HEVC: IRAP NAL types 16..21 from
+         * (header and 0x7E) shr 1. H.264: IDR slice, (header and 0x1F) == 5.
+         * Internal (not private) so unit tests can exercise both branches.
+         */
+        internal fun isSyncFrame(
             data: ByteArray,
             size: Int,
+            isHevc: Boolean,
         ): Boolean {
             var i = 0
             while (i + 5 < size) {
@@ -578,8 +621,14 @@ class StreamClient(
                 val nalStart = start + startCodeLength
                 if (nalStart + 1 >= size) return false
 
-                val nalType = (data[nalStart].toInt() and 0x7E) shr 1
-                if (nalType in 16..21) {
+                val header = data[nalStart].toInt()
+                val isSync =
+                    if (isHevc) {
+                        ((header and 0x7E) shr 1) in 16..21
+                    } else {
+                        (header and 0x1F) == 5
+                    }
+                if (isSync) {
                     return true
                 }
 
