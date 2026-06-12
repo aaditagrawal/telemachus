@@ -1356,8 +1356,9 @@ struct WirelessSection: View {
             refreshPaired()
             nowTick = Date()
         }
-        // One-parameter onChange: deprecated on macOS 14 SDKs (warning only)
-        // but required to run on macOS 13.
+        // One-parameter onChange(of:perform:) works on macOS 13+. The
+        // two-parameter form requires macOS 14 and would block Ventura.
+        // Deprecation is a compile-time warning only on Xcode 15+ SDKs.
         .onChange(of: settings.port) { _ in refreshQR() }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { now in
             nowTick = now
