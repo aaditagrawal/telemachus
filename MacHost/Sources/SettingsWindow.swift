@@ -81,6 +81,13 @@ struct SettingsView: View {
     @State private var customWidthText = ""
     @State private var customHeightText = ""
 
+    private var customWidthValue: Int? { Int(customWidthText.trimmingCharacters(in: .whitespaces)) }
+    private var customHeightValue: Int? { Int(customHeightText.trimmingCharacters(in: .whitespaces)) }
+    private var customResolutionValid: Bool {
+        guard let w = customWidthValue, let h = customHeightValue else { return false }
+        return DisplaySettings.isValidCustomResolution(width: w, height: h)
+    }
+
     var body: some View {
         ZStack {
             VisualEffectBlur(material: .sidebar, blendingMode: .behindWindow)
@@ -265,20 +272,25 @@ struct SettingsView: View {
                                                 .textFieldStyle(.roundedBorder)
                                                 .frame(width: 70)
                                             Button("Apply") {
-                                                guard let w = Int(customWidthText.trimmingCharacters(in: .whitespaces)),
-                                                      let h = Int(customHeightText.trimmingCharacters(in: .whitespaces)) else { return }
+                                                guard customResolutionValid,
+                                                      let w = customWidthValue,
+                                                      let h = customHeightValue else { return }
                                                 settings.customWidth = w
                                                 settings.customHeight = h
                                                 settings.applyCustomResolution()
                                             }
                                             .buttonStyle(.bordered)
                                             .controlSize(.small)
-                                            .disabled(Int(customWidthText.trimmingCharacters(in: .whitespaces)) == nil ||
-                                                      Int(customHeightText.trimmingCharacters(in: .whitespaces)) == nil)
+                                            .disabled(!customResolutionValid)
                                         }
                                         .onAppear {
                                             customWidthText = String(settings.customWidth)
                                             customHeightText = String(settings.customHeight)
+                                        }
+                                        if !customResolutionValid {
+                                            Text("Supported range: 640–7680 × 480–4320")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.orange)
                                         }
                                     }
                                 }
@@ -1192,8 +1204,12 @@ class DisplaySettings: ObservableObject {
         return (baseWidth, baseHeight)
     }
 
+    static func isValidCustomResolution(width: Int, height: Int) -> Bool {
+        width >= 640 && width <= 7680 && height >= 480 && height <= 4320
+    }
+
     func applyCustomResolution() {
-        if customWidth >= 640 && customWidth <= 7680 && customHeight >= 480 && customHeight <= 4320 {
+        if DisplaySettings.isValidCustomResolution(width: customWidth, height: customHeight) {
             resolution = "\(customWidth)x\(customHeight)"
         }
     }
