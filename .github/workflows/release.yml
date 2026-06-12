@@ -151,12 +151,16 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Get previous tag
-          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p')
-          if [ -z "$PREV_TAG" ]; then
-            NOTES=$(git log --oneline -10 --format="- %s")
-          else
-            NOTES=$(git log --oneline "$PREV_TAG"..HEAD --format="- %s" | grep -v "^- chore:" | head -3)
+          # Extract this version's section from CHANGELOG.md (heading to next ---).
+          # The section already contains Added/Fixed/Notes/Installation.
+          VERSION=$(cat VERSION)
+          NOTES=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            flag && /^---/ {exit}
+            flag {print}
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for details."
           fi
           {
             echo "notes<<EOF"
@@ -177,10 +181,6 @@ jobs:
             |----------|------|
             | macOS (Universal) | `SideScreen-${{ steps.version.outputs.version }}-mac-universal.dmg` |
             | Android | `SideScreen-${{ steps.version.outputs.version }}-android.apk` |
-
-            ### Installation
-            - **macOS**: Open DMG, drag to Applications. If Gatekeeper says "damaged": `sudo xattr -cr /Applications/SideScreen.app`
-            - **Android**: Install APK (enable "Unknown sources" if needed)
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/android-apk/*.apk
