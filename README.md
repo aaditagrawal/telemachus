@@ -97,6 +97,10 @@ Configure resolution (up to 4K/8K), frame rate (30–120 FPS), bitrate (20–500
   <img src="resources/screenshots/android_settings.png" alt="Android — Connection Screen" height="500"/>
 </div>
 
+### Headless / portable Mac (new in 0.11.0)
+
+Run a Mac with no display of its own — a Mac Studio or Mini on the go, or a laptop in clamshell — using the tablet as its only screen. Enable Launch at Login and Auto-start streaming, and the Mac boots straight into serving the tablet, with nothing to press on the Mac.
+
 <p align="right"><a href="#readme-top">↑ Back to top</a></p>
 
 ---
@@ -173,6 +177,12 @@ cd AndroidClient && ./gradlew assembleDebug
 Wireless mode requires both devices to be on the same WiFi network. **5 GHz is strongly recommended** — 2.4 GHz can introduce noticeable jitter on dynamic content. If you need to revoke access, click **Reset Token (forget all)** on the Mac and re-pair each tablet.
 
 USB mode remains the lowest-latency option for drawing or fast-paced gaming. Wireless adds 10–50 ms depending on WiFi quality.
+
+### Headless mode (new in 0.11.0 — no Mac interaction)
+
+In Settings → Startup, turn on **Launch at Login** and **Auto-start streaming on launch**, then pick the **Startup mode** (USB or Wireless). On your next login the server starts automatically — just open Side Screen on the tablet and tap Connect (USB) or Reconnect (Wireless).
+
+First-time setup still needs a screen once to grant Screen Recording permission; after that the Mac runs fully headless. For wireless headless use, give the Mac a static IP or DHCP reservation, and consider enabling macOS Screen Sharing as a fallback way in.
 
 ---
 
