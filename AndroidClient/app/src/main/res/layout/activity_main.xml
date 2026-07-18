@@ -2,15 +2,27 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    tools:ignore="TooManyViews">
 
     <!-- Video Surface -->
     <SurfaceView
         android:id="@+id/surfaceView"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <View
+        android:id="@+id/disconnectedBackdrop"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/disconnected_background"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -45,14 +57,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="FPS"
+                    android:text="@string/stats_fps"
                     android:textColor="#88FFFFFF"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
                 <TextView
                     android:id="@+id/fpsText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/placeholder_dashes"
                     android:textColor="#4CAF50"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -67,14 +79,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="BITRATE"
+                    android:text="@string/stats_bitrate"
                     android:textColor="#88FFFFFF"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
                 <TextView
                     android:id="@+id/bitrateText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/placeholder_dashes"
                     android:textColor="#2196F3"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -89,14 +101,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="RESOLUTION"
+                    android:text="@string/stats_resolution"
                     android:textColor="#88FFFFFF"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
                 <TextView
                     android:id="@+id/resolutionText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/placeholder_dashes"
                     android:textColor="#FF9800"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -110,14 +122,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="RTT"
+                    android:text="@string/stats_rtt"
                     android:textColor="#88FFFFFF"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
                 <TextView
                     android:id="@+id/latencyText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/placeholder_dashes"
                     android:textColor="#E91E63"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -143,22 +155,25 @@
             android:layout_width="24dp"
             android:layout_height="24dp"
             android:layout_gravity="center"
+            android:contentDescription="@string/display_settings"
             android:src="@drawable/ic_settings"
-            android:tint="#FFFFFF" />
+            app:tint="#FFFFFF" />
     </androidx.cardview.widget.CardView>
 
     <!-- Modern Connection Panel -->
     <androidx.cardview.widget.CardView
         android:id="@+id/settingsPanel"
         android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginStart="32dp"
-        android:layout_marginEnd="32dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginBottom="24dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="20dp"
         android:elevation="24dp"
-        app:cardCornerRadius="32dp"
-        app:cardBackgroundColor="#E6000000"
+        app:cardCornerRadius="28dp"
+        app:cardBackgroundColor="#F512181C"
+        app:cardElevation="18dp"
+        app:layout_constraintWidth_max="680dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -166,28 +181,43 @@
 
         <androidx.core.widget.NestedScrollView
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:overScrollMode="never"
             android:fillViewport="true">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="40dp">
+            android:paddingStart="40dp"
+            android:paddingTop="32dp"
+            android:paddingEnd="40dp"
+            android:paddingBottom="28dp">
 
-            <!-- Icon -->
-            <View
-                android:layout_width="80dp"
-                android:layout_height="80dp"
+            <ImageView
+                android:layout_width="72dp"
+                android:layout_height="72dp"
                 android:layout_gravity="center"
-                android:background="@drawable/connection_icon_bg"
-                android:layout_marginBottom="24dp" />
+                android:contentDescription="@string/app_name"
+                android:src="@mipmap/ic_launcher"
+                android:layout_marginBottom="20dp" />
 
-            <!-- Header -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Side Screen"
+                android:text="@string/wordmark"
+                android:textColor="#65D992"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.16"
+                android:gravity="center"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:id="@+id/connectionTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/waiting_for_mac"
                 android:textColor="#FFFFFF"
                 android:textSize="28sp"
                 android:textStyle="bold"
@@ -196,20 +226,31 @@
                 android:layout_marginBottom="8dp" />
 
             <TextView
+                android:id="@+id/connectionSubtitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Turn your tablet into a second display"
-                android:textColor="#999999"
+                android:text="@string/usb_waiting_description"
+                android:textColor="#A8B0B6"
                 android:textSize="14sp"
+                android:lineSpacingExtra="3dp"
                 android:gravity="center"
                 android:layout_marginBottom="20dp" />
+
+            <ProgressBar
+                android:id="@+id/connectionProgress"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:layout_marginBottom="20dp"
+                android:indeterminateTint="#65D992" />
 
             <!-- Mode toggle: USB / Wireless -->
             <com.google.android.material.button.MaterialButtonToggleGroup
                 android:id="@+id/modeToggleGroup"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="20dp"
+                android:layout_marginBottom="16dp"
                 app:selectionRequired="true"
                 app:singleSelection="true">
 
@@ -218,7 +259,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="USB"
+                    android:text="@string/usb"
                     android:textColor="@color/mode_toggle_text"
                     app:backgroundTint="@color/mode_toggle_bg"
                     app:strokeColor="#444444"
@@ -229,7 +270,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="Wireless"
+                    android:text="@string/wireless"
                     android:textColor="@color/mode_toggle_text"
                     app:backgroundTint="@color/mode_toggle_bg"
                     app:strokeColor="#444444"
@@ -251,12 +292,13 @@
                 android:orientation="vertical"
                 android:padding="16dp"
                 android:background="@drawable/instruction_bg"
-                android:layout_marginBottom="24dp">
+                android:layout_marginBottom="16dp"
+                android:visibility="gone">
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Connection Checklist"
+                    android:text="@string/connection_checklist"
                     android:textColor="#FFFFFF"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -280,7 +322,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="Developer Mode enabled"
+                        android:text="@string/developer_mode_enabled"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp" />
                 </LinearLayout>
@@ -303,7 +345,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="USB Debugging enabled"
+                        android:text="@string/usb_debugging_enabled"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp" />
                 </LinearLayout>
@@ -326,7 +368,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="USB cable connected"
+                        android:text="@string/usb_cable_connected"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp" />
                 </LinearLayout>
@@ -348,7 +390,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="Mac server running"
+                        android:text="@string/mac_server_running"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp" />
                 </LinearLayout>
@@ -359,13 +401,14 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/connectButton"
                 android:layout_width="match_parent"
-                android:layout_height="64dp"
-                android:text="Connect"
-                android:textSize="18sp"
+                android:layout_height="56dp"
+                android:text="@string/try_again"
+                android:textSize="16sp"
                 android:textStyle="bold"
-                app:cornerRadius="20dp"
-                app:backgroundTint="#007AFF"
-                android:layout_marginBottom="20dp" />
+                android:textColor="#07100B"
+                app:cornerRadius="18dp"
+                app:backgroundTint="#65D992"
+                android:layout_marginBottom="14dp" />
 
             <!-- Status Section -->
             <LinearLayout
@@ -373,13 +416,18 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="16dp">
+                android:background="@drawable/connection_status_bg"
+                android:paddingStart="14dp"
+                android:paddingTop="11dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="11dp"
+                android:layout_marginBottom="12dp">
 
                 <View
                     android:id="@+id/statusIndicator"
                     android:layout_width="10dp"
                     android:layout_height="10dp"
-                    android:background="@drawable/status_indicator"
+                    android:background="@drawable/status_indicator_waiting"
                     android:layout_marginEnd="10dp" />
 
                 <TextView
@@ -387,9 +435,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Ready to connect"
-                    android:textColor="#AAAAAA"
-                    android:textSize="14sp" />
+                    android:text="@string/looking_for_mac"
+                    android:textColor="#C4CBD0"
+                    android:textSize="13sp" />
             </LinearLayout>
 
             <!-- Advanced Settings (collapsed by default) -->
@@ -411,8 +459,8 @@
                         android:id="@+id/hostInput"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="Host"
-                        android:text="127.0.0.1"
+                        android:hint="@string/host"
+                        android:text="@string/loopback_host"
                         android:textColor="#FFFFFF"
                         android:textColorHint="#888888"
                         android:inputType="text" />
@@ -428,8 +476,8 @@
                         android:id="@+id/portInput"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="Port"
-                        android:text="54321"
+                        android:hint="@string/port"
+                        android:text="@string/default_port"
                         android:textColor="#FFFFFF"
                         android:textColorHint="#888888"
                         android:inputType="number" />
@@ -442,8 +490,8 @@
                 android:id="@+id/showAdvanced"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Advanced Settings"
-                android:textColor="#007AFF"
+                android:text="@string/connection_details"
+                android:textColor="#8FB9FF"
                 android:textSize="13sp"
                 android:gravity="center"
                 android:padding="8dp" />
@@ -481,7 +529,7 @@
                         android:id="@+id/connectingLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Connecting…"
+                        android:text="@string/connecting"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp"
                         android:textStyle="bold"
@@ -511,7 +559,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Pair with your Mac"
+                        android:text="@string/pair_with_mac"
                         android:textColor="#FFFFFF"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -521,17 +569,26 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Open Side Screen on your Mac → switch to the Wireless tab → scan the QR shown"
+                        android:text="@string/pair_with_mac_instructions"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
                         android:layout_marginBottom="16dp" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:gravity="center"
+                        android:text="@string/wireless_trusted_network_note"
+                        android:textColor="#FBBF24"
+                        android:textSize="12sp" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/wirelessScanButton"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:text="Scan QR Code"
+                        android:text="@string/scan_qr_code"
                         android:textSize="16sp"
                         app:cornerRadius="16dp"
                         app:backgroundTint="#4ade80"
@@ -552,7 +609,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="● Connected"
+                        android:text="@string/connected_status"
                         android:textColor="#4ade80"
                         android:textSize="14sp"
                         android:textStyle="bold"
@@ -563,7 +620,7 @@
                         android:id="@+id/connectedMacName"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Mac"
+                        android:text="@string/mac_default_name"
                         android:textColor="#FFFFFF"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -573,7 +630,7 @@
                         android:id="@+id/connectedMacIp"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="—"
+                        android:text="@string/empty_value"
                         android:textColor="#888888"
                         android:textSize="12sp"
                         android:gravity="center"
@@ -584,7 +641,7 @@
                         style="?attr/materialButtonOutlinedStyle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Disconnect"
+                        android:text="@string/disconnect"
                         android:layout_marginBottom="8dp" />
 
                     <com.google.android.material.button.MaterialButton
@@ -592,7 +649,7 @@
                         style="?attr/materialButtonOutlinedStyle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Forget this Mac"
+                        android:text="@string/forget_this_mac"
                         android:textColor="#fca5a5"
                         app:strokeColor="#7f1d1d" />
                 </LinearLayout>
@@ -611,7 +668,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="○ Disconnected"
+                        android:text="@string/disconnected_status"
                         android:textColor="#888888"
                         android:textSize="14sp"
                         android:textStyle="bold"
@@ -622,7 +679,7 @@
                         android:id="@+id/idleMacName"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Mac"
+                        android:text="@string/mac_default_name"
                         android:textColor="#FFFFFF"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -632,7 +689,7 @@
                         android:id="@+id/idleMacIp"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="—"
+                        android:text="@string/empty_value"
                         android:textColor="#888888"
                         android:textSize="12sp"
                         android:gravity="center"
@@ -642,7 +699,7 @@
                         android:id="@+id/wirelessReconnectButton"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:text="Reconnect"
+                        android:text="@string/reconnect"
                         android:textSize="16sp"
                         app:cornerRadius="16dp"
                         app:backgroundTint="#4CAF50"
@@ -654,7 +711,7 @@
                         style="?attr/materialButtonOutlinedStyle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Forget this Mac"
+                        android:text="@string/forget_this_mac"
                         android:textColor="#fca5a5"
                         app:strokeColor="#7f1d1d" />
                 </LinearLayout>
@@ -674,7 +731,7 @@
                         android:id="@+id/repairTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="⚠ Couldn't connect"
+                        android:text="@string/could_not_connect"
                         android:textColor="#fca5a5"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -685,7 +742,7 @@
                         android:id="@+id/repairMessage"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Scan a fresh QR from your Mac to re-pair."
+                        android:text="@string/scan_fresh_qr"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
@@ -695,7 +752,7 @@
                         android:id="@+id/wirelessRescanButton"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:text="Scan QR Code"
+                        android:text="@string/scan_qr_code"
                         app:cornerRadius="16dp"
                         app:backgroundTint="#4ade80"
                         android:textColor="#000000" />
@@ -715,7 +772,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Camera permission required to scan QR"
+                        android:text="@string/camera_permission_required"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp"
                         android:textStyle="bold"
@@ -725,7 +782,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="You blocked the permission. Open Settings → Apps → Side Screen → Permissions to allow."
+                        android:text="@string/camera_permission_settings_instructions"
                         android:textColor="#BBBBBB"
                         android:textSize="13sp"
                         android:gravity="center"
@@ -735,13 +792,25 @@
                         android:id="@+id/wirelessOpenSettingsButton"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:text="Open Settings"
+                        android:text="@string/open_settings"
                         app:cornerRadius="16dp"
                         app:backgroundTint="#007AFF" />
                 </LinearLayout>
 
             </LinearLayout>
             <!-- ============= /WIRELESS MODE CONTENT ============= -->
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:autoLink="web"
+                android:gravity="center"
+                android:linksClickable="true"
+                android:text="@string/fork_credit"
+                android:textColor="#7F8A90"
+                android:textColorLink="#8FB9FF"
+                android:textSize="11sp" />
 
             <!-- Hidden disconnect button reference (needed by code) -->
             <com.google.android.material.button.MaterialButton
@@ -759,6 +828,8 @@
         android:id="@+id/logText"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:visibility="gone" />
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

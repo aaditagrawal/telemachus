@@ -12,8 +12,8 @@ echo "Building version $VERSION..."
 cd "$ROOT_DIR/MacHost"
 
 # Kill running instance
-echo "Stopping running Side Screen..."
-pkill -f SideScreen 2>/dev/null || true
+echo "Stopping running Telemachus..."
+pkill -x Telemachus 2>/dev/null || true
 sleep 0.5
 
 # Clean old build
@@ -30,90 +30,16 @@ swift build -c release --arch x86_64
 echo "Creating Universal Binary..."
 mkdir -p ".build/release-universal"
 lipo -create \
-  .build/arm64-apple-macosx/release/SideScreen \
-  .build/x86_64-apple-macosx/release/SideScreen \
-  -output .build/release-universal/SideScreen
+  .build/arm64-apple-macosx/release/Telemachus \
+  .build/x86_64-apple-macosx/release/Telemachus \
+  -output .build/release-universal/Telemachus
 
-# Create .app bundle
-APP_NAME="SideScreen"
-APP_DIR="$ROOT_DIR/$APP_NAME.app"
-
-echo "Creating app bundle..."
-rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS"
-mkdir -p "$APP_DIR/Contents/Resources"
-
-# Copy universal binary
-cp .build/release-universal/SideScreen "$APP_DIR/Contents/MacOS/"
-
-# No LaunchAgent plist needed for SMAppService.mainApp
-
-# Copy app icon if exists
-if [ -f "$ROOT_DIR/MacHost/Resources/AppIcon.icns" ]; then
-    cp "$ROOT_DIR/MacHost/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/"
-    echo "  ✓ App icon copied"
-fi
-
-# Create Info.plist
-cat > "$APP_DIR/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>SideScreen</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.sidescreen.app</string>
-    <key>CFBundleName</key>
-    <string>Side Screen</string>
-    <key>CFBundleDisplayName</key>
-    <string>Side Screen</string>
-    <key>CFBundleVersion</key>
-    <string>$VERSION</string><!-- VERSION -->
-    <key>CFBundleShortVersionString</key>
-    <string>$VERSION</string><!-- VERSION -->
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
-    <key>LSUIElement</key>
-    <false/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSSupportsAutomaticGraphicsSwitching</key>
-    <true/>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Side Screen needs screen recording access to capture your virtual display and stream it to your Android device.</string>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>Side Screen needs Local Network access so your Android tablet can connect to the Mac over WiFi for wireless mode. Without this, only USB-tethered connections work.</string>
-    <key>NSBonjourServices</key>
-    <array>
-        <string>_sidescreen._tcp</string>
-    </array>
-</dict>
-</plist>
-EOF
-
-# Ad-hoc code sign to prevent Gatekeeper "damaged" error
-echo "Code signing (ad-hoc)..."
-codesign --force --deep --sign - --entitlements "$ROOT_DIR/MacHost/SideScreen.entitlements" "$APP_DIR"
-echo "  ✓ App signed"
+echo "Packaging ad-hoc signed source build..."
+TELEMACHUS_SIGNING_IDENTITY=- \
+TELEMACHUS_ARTIFACT_SUFFIX=mac-universal-unsigned-source-build \
+    "$ROOT_DIR/scripts/package_mac.sh"
 
 echo ""
 echo "Build successful!"
-echo ""
-echo "App: $ROOT_DIR/$APP_NAME.app"
-echo "To run: open $APP_NAME.app"
-
-# Create DMG with Applications symlink
-echo ""
-echo "Creating DMG..."
-DMG_DIR=$(mktemp -d)
-cp -R "$APP_DIR" "$DMG_DIR/"
-ln -s /Applications "$DMG_DIR/Applications"
-DMG_PATH="$ROOT_DIR/SideScreen-${VERSION}-mac-universal.dmg"
-hdiutil create -volname "Side Screen" -srcfolder "$DMG_DIR" -ov -format UDZO "$DMG_PATH"
-rm -rf "$DMG_DIR"
-echo "DMG: $DMG_PATH"
+echo "App: $ROOT_DIR/Telemachus.app"
+echo "To run: open $ROOT_DIR/Telemachus.app"

@@ -1,14 +1,15 @@
 /* ========================================
-   Side Screen - Landing Page Styles
+   Telemachus - Landing Page Styles
    Lean, DockDoor-inspired layout
    ======================================== */
 
 /* CSS Variables - Light Mode (Default) */
 :root {
-    --color-primary: #007AFF;
-    --color-primary-dark: #0056CC;
-    --color-secondary: #5856D6;
-    --color-success: #34C759;
+    --color-primary: #65D992;
+    --color-primary-dark: #38AD6C;
+    --color-secondary: #8FB9FF;
+    --color-success: #65D992;
+    --color-on-primary: #07100B;
     --color-warning: #FF9500;
     --color-danger: #FF3B30;
 
@@ -219,13 +220,13 @@ a:hover {
 
 .btn-primary {
     background: var(--color-primary);
-    color: var(--color-text-light);
+    color: var(--color-on-primary);
     position: relative;
 }
 
 .btn-primary:hover {
     background: var(--color-primary-dark);
-    color: var(--color-text-light);
+    color: var(--color-on-primary);
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }
@@ -265,18 +266,6 @@ a:hover {
 .btn-large {
     padding: 16px 32px;
     font-size: 1.1rem;
-}
-
-.btn-coffee {
-    background: #FFDD00;
-    color: #000000;
-}
-
-.btn-coffee:hover {
-    background: #FFCC00;
-    color: #000000;
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
 }
 
 /* ========================================
@@ -369,8 +358,10 @@ a:hover {
     left: -50%;
     width: 200%;
     height: 200%;
-    background: radial-gradient(circle at 30% 20%, rgba(0, 122, 255, 0.06) 0%, transparent 50%),
-                radial-gradient(circle at 70% 80%, rgba(88, 86, 214, 0.06) 0%, transparent 50%);
+    background:
+        linear-gradient(90deg, transparent 49.8%, rgba(101, 217, 146, 0.08) 50%, transparent 50.2%),
+        radial-gradient(circle at 30% 20%, rgba(101, 217, 146, 0.12) 0%, transparent 48%),
+        radial-gradient(circle at 75% 75%, rgba(143, 185, 255, 0.08) 0%, transparent 46%);
     animation: float 20s ease-in-out infinite;
     pointer-events: none;
 }
@@ -476,9 +467,9 @@ a:hover {
     height: 120%;
     background: radial-gradient(
         circle,
-        rgba(0, 122, 255, 0.5) 0%,
-        rgba(0, 122, 255, 0.25) 40%,
-        rgba(88, 86, 214, 0.08) 70%,
+        rgba(101, 217, 146, 0.42) 0%,
+        rgba(101, 217, 146, 0.2) 40%,
+        rgba(143, 185, 255, 0.08) 70%,
         transparent 80%
     );
     filter: blur(45px);
@@ -486,13 +477,29 @@ a:hover {
     animation: glow-pulse 4s ease-in-out infinite;
 }
 
-/* Privacy Badge */
-.privacy-badge {
+.hero-icon-container {
+    background: transparent;
+    box-shadow: none;
+}
+
+.hero-icon-container::before {
+    display: none;
+}
+
+.hero-icon-container img {
+    width: min(100%, 520px);
+    margin-inline: auto;
+    border-radius: 24%;
+}
+
+/* Fork lineage badge */
+.fork-badge {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    background: linear-gradient(135deg, #30D158 0%, #64D2FF 100%);
-    color: white;
+    background: rgba(101, 217, 146, 0.11);
+    border: 1px solid rgba(101, 217, 146, 0.34);
+    color: var(--color-text);
     padding: 8px 16px;
     border-radius: 100px;
     font-size: 0.875rem;
@@ -504,7 +511,24 @@ a:hover {
     overflow: hidden;
 }
 
-.privacy-badge::before {
+.fork-badge:hover {
+    color: var(--color-text);
+    border-color: var(--color-primary);
+    background: rgba(101, 217, 146, 0.18);
+}
+
+.fork-badge-mark {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    font-size: 0.75rem;
+}
+
+.fork-badge::before {
     content: '';
     position: absolute;
     top: 0;
@@ -513,6 +537,82 @@ a:hover {
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
     animation: shimmer 3s infinite;
+}
+
+/* ========================================
+   LINEAGE
+   ======================================== */
+.lineage {
+    padding-top: 72px;
+    padding-bottom: 72px;
+}
+
+.lineage-shell {
+    display: grid;
+    grid-template-columns: 0.95fr 1.25fr;
+    gap: 56px;
+    align-items: stretch;
+    padding: 48px;
+    border: 1px solid rgba(101, 217, 146, 0.22);
+    border-radius: 32px;
+    background:
+        linear-gradient(145deg, rgba(101, 217, 146, 0.09), transparent 42%),
+        var(--color-bg-alt);
+    box-shadow: var(--shadow-lg);
+}
+
+.eyebrow,
+.lineage-label {
+    color: var(--color-primary-dark);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.lineage-intro h2 {
+    margin: 10px 0 16px;
+    font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.lineage-intro p {
+    max-width: 48rem;
+}
+
+.lineage-link {
+    display: inline-flex;
+    gap: 8px;
+    margin-top: 22px;
+    font-weight: 600;
+}
+
+.lineage-grid {
+    display: grid;
+    gap: 14px;
+}
+
+.lineage-card {
+    padding: 24px;
+    border-radius: 20px;
+    background: rgba(10, 15, 17, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lineage-card h3 {
+    margin: 9px 0 8px;
+    color: #F7FAF8;
+}
+
+.lineage-card p {
+    color: #A8B0B6;
+}
+
+.lineage-card-telemachus {
+    box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.lineage-card-foundation {
+    box-shadow: inset 3px 0 0 #8FB9FF;
 }
 
 .privacy-highlights {
@@ -564,6 +664,13 @@ a:hover {
     grid-template-columns: 2fr 3fr;
     gap: 60px;
     align-items: center;
+}
+
+.special-feature-item.text-only {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 760px;
+    margin-inline: auto;
+    text-align: center;
 }
 
 .special-feature-item:nth-child(even) {
@@ -827,87 +934,6 @@ a:hover {
 }
 
 /* ========================================
-   MODAL
-   ======================================== */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 2000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all var(--transition-normal);
-}
-
-.modal-overlay.active {
-    opacity: 1;
-    visibility: visible;
-}
-
-.modal-content {
-    background: var(--color-bg-alt);
-    padding: 40px;
-    border-radius: var(--border-radius-xl);
-    max-width: 450px;
-    width: calc(100% - 48px);
-    text-align: center;
-    position: relative;
-    transform: scale(0.9) translateY(20px);
-    transition: transform var(--transition-normal);
-    box-shadow: var(--shadow-xl);
-}
-
-.modal-overlay.active .modal-content {
-    transform: scale(1) translateY(0);
-}
-
-.modal-close {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: var(--color-text-secondary);
-    padding: 8px;
-    line-height: 1;
-}
-
-.modal-close:hover {
-    color: var(--color-text);
-}
-
-.modal-title {
-    font-size: 1.5rem;
-    margin-bottom: 12px;
-}
-
-.modal-text {
-    color: var(--color-text-secondary);
-    margin-bottom: 24px;
-    line-height: 1.6;
-}
-
-.modal-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.modal-actions .btn {
-    width: 100%;
-}
-
-/* ========================================
    FAQ
    ======================================== */
 .faq {
@@ -995,6 +1021,12 @@ a:hover {
 .footer-copy {
     color: rgba(255, 255, 255, 0.5);
     font-size: 0.875rem;
+}
+
+.footer-copy a {
+    color: rgba(255, 255, 255, 0.82);
+    text-decoration: underline;
+    text-underline-offset: 3px;
 }
 
 /* ========================================
@@ -1142,6 +1174,9 @@ a:hover {
 
 /* Tablet landscape & small desktop */
 @media (max-width: 1024px) {
+    .lineage-shell {
+        grid-template-columns: 1fr;
+    }
     .hero > .container {
         grid-template-columns: 1fr;
         gap: 3rem;
@@ -1254,6 +1289,10 @@ a:hover {
 
 /* Phone */
 @media (max-width: 768px) {
+    .lineage-shell {
+        padding: 28px 22px;
+        border-radius: 24px;
+    }
     :root {
         --section-padding: 60px;
     }
@@ -1370,10 +1409,6 @@ a:hover {
         font-size: 0.8rem;
     }
 
-    /* Modal mobile */
-    .modal-content {
-        padding: 28px 20px;
-    }
 }
 
 /* Hamburger menu on phones */

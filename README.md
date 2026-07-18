@@ -1,292 +1,283 @@
-<a id="readme-top"></a>
+# Telemachus
 
-<div align="center">
-
-<img src="resources/logo/sidescreen-icon.png" alt="Side Screen" width="128"/>
-
-<h1>Side Screen</h1>
-
-<p><em>Turn your Android tablet into a second display for macOS — USB-C or wireless over WiFi</em></p>
-
-<p>
-  <img src="https://img.shields.io/github/v/release/tranvuongquocdat/SideScreen?style=for-the-badge&label=version&color=blue" alt="Version">
-  <a href="https://github.com/tranvuongquocdat/SideScreen/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/tranvuongquocdat/SideScreen?style=for-the-badge&color=34C759" alt="License">
-  </a>
-  <a href="https://github.com/tranvuongquocdat/SideScreen/stargazers">
-    <img src="https://img.shields.io/github/stars/tranvuongquocdat/SideScreen?style=for-the-badge&color=FF9500" alt="Stars">
-  </a>
-  <a href="https://github.com/tranvuongquocdat/SideScreen/releases">
-    <img src="https://img.shields.io/github/downloads/tranvuongquocdat/SideScreen/total?style=for-the-badge&color=8E44AD&label=downloads" alt="Downloads">
-  </a>
+<p align="center">
+  <img src="resources/logo/main_logo.png" alt="Telemachus Companion Screens icon" width="144">
 </p>
 
-![Swift](https://img.shields.io/badge/Swift-FA7343?style=for-the-badge&logo=swift&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS_13+-000000?style=for-the-badge&logo=apple&logoColor=white)
-![Android](https://img.shields.io/badge/Android_8+-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![Universal Binary](https://img.shields.io/badge/Universal_Binary-Apple_Silicon_+_Intel-000000?style=for-the-badge&logo=apple&logoColor=white)
+Telemachus turns an Android tablet into a low-latency extended display or
+output monitor for macOS.
 
-</div>
+**Why does this exist?** This exists because I have a Mac Mini running a lot of
+tasks for me on Codex. I wanted a solution that would help me have some device
+attached to it for immediate extended use. I can monitor what it is doing while
+it's performing computer use while I can use my monitor and my laptop for my
+daily work. Worked on by GPT 5.6 Sol High.
 
----
+> [!IMPORTANT]
+> **Telemachus is a direct fork of
+> [SideScreen](https://github.com/tranvuongquocdat/SideScreen).**
+> Tran Vuong Quoc Dat and the SideScreen contributors created the virtual
+> display, capture, encoding, transport, decoding, wireless, and touch
+> foundation that made this project possible. See [Attribution](#attribution)
+> for the full lineage and a detailed account of what this fork changes.
 
-<div align="center">
-  <img src="resources/screenshots/hero_screenshot.jpeg" alt="Side Screen — Mac + Android tablet as second display" width="800"/>
-</div>
-
----
-
-## About
-
-Side Screen brings true second-display functionality to your Android tablet — over USB-C cable for the lowest latency, or wirelessly over WiFi after a one-time QR pair. Something macOS doesn't natively support either way.
-
-While Apple's Sidecar only works with iPads, millions of Android tablets sit unused as potential workstations. Side Screen bridges that gap with hardware-accelerated H.265 streaming, sub-16ms pipeline latency on USB, and full touch input — making your tablet feel like a real monitor, not a laggy mirror.
-
-Built entirely open-source, Side Screen is designed to be fast, lightweight, and seamlessly integrated.
-
-For full details, features, and documentation, please visit **[sidescreen.dev](https://sidescreen.dev)**
-
-<p align="right"><a href="#readme-top">↑ Back to top</a></p>
-
----
+The preferred transport is USB through `adb reverse`. Wireless LAN streaming
+is also supported. Video is hardware-encoded with VideoToolbox on the Mac and
+hardware-decoded with MediaCodec on Android.
 
 ## Features
 
-### USB-C or Wireless
+- A real macOS extended desktop using a virtual display
+- Mirroring of the current main display or an existing Screen Sharing display
+- Automatic USB setup, Android launch, reconnection, and login startup
+- Authenticated wireless pairing through a QR code
+- HEVC streaming with automatic H.264 compatibility fallback
+- Bounded capture, encode, network, and decode queues that favor current frames
+- Touch, drag, scrolling, pinch, long-press, and letterbox-aware input mapping
+- Resolution, refresh rate, bitrate, rotation, HiDPI, and quality controls
+- Live FPS, bitrate, RTT, decoder latency, frame age, and drop diagnostics
+- Guided macOS permission setup and clear Android connection states
 
-Two ways to connect, same picture quality. **USB-C** plugs in the cable for the lowest possible latency — adb-reverse port forwarding is set up automatically. **Wireless** lets you scan a QR code from the Mac once and the tablet auto-reconnects on every future launch over WiFi (5 GHz strongly recommended). The auth token is generated locally and stays on your Mac; reset it any time to revoke access.
+## How it works
 
-### Virtual Display
+```text
+macOS pixels
+  → ScreenCaptureKit (CGDisplayStream fallback)
+  → VideoToolbox HEVC/H.264 encoder
+  → bounded low-latency TCP stream
+  → adb reverse over USB or authenticated LAN
+  → Android MediaCodec decoder
+  → SurfaceView
 
-Create a true virtual display on your Mac. Drag windows to your tablet like a real monitor — not mirroring, but extending.
+Android touch
+  → normalized input protocol
+  → macOS CGEvent injection
+```
 
-<div align="center">
-  <img src="resources/screenshots/feature_virtual_display.png" alt="Virtual Display in macOS Display Preferences" width="600"/>
-</div>
-
-### Ultra-Low Latency
-
-Hardware-accelerated H.265 encoding on Mac and decoding on Android. Async pipeline architecture delivers frames in under 30ms.
-
-<div align="center">
-  <img src="resources/screenshots/android_performance.png" alt="Low Latency Streaming with Stats Overlay" width="700"/>
-</div>
-
-### Touch Support
-
-Use your tablet's touchscreen to interact with macOS. Touch prediction compensates for network latency, making taps and drags feel natural.
-
-### HiDPI (Retina) Support
-
-Enable HiDPI mode to render at 2× resolution internally — text and icons are sharp at any logical resolution, just like a MacBook Retina display. Perfect for users with 2K/4K tablets who want a readable workspace without sacrificing sharpness.
-
-### Gaming Mode
-
-Enable Gaming Boost for optimized settings: 1 Gbps bitrate, ultra-low latency encoding, 120 FPS.
-
-### Customizable
-
-Configure resolution (up to 4K/8K), frame rate (30–120 FPS), bitrate (20–5000 Mbps), and quality presets from the Mac app.
-
-<div align="center">
-  <img src="resources/screenshots/mac_settings_1.png" alt="macOS Settings — Display & FPS" height="500"/>
-  &nbsp;&nbsp;
-  <img src="resources/screenshots/mac_settings_2.png" alt="macOS Settings — Streaming & Status" height="500"/>
-  &nbsp;&nbsp;
-  <img src="resources/screenshots/android_settings.png" alt="Android — Connection Screen" height="500"/>
-</div>
-
-### Headless / portable Mac (new in 0.11.0)
-
-Run a Mac with no display of its own — a Mac Studio or Mini on the go, or a laptop in clamshell — using the tablet as its only screen. Enable Launch at Login and Auto-start streaming, and the Mac boots straight into serving the tablet, with nothing to press on the Mac.
-
-<p align="right"><a href="#readme-top">↑ Back to top</a></p>
-
----
+USB does not turn an Android tablet into a native DisplayPort or HDMI monitor.
+The cable carries compressed video through the Android Debug Bridge. Software
+is required on both devices, along with one-time USB-debugging authorization
+and macOS permission grants. After setup, reconnecting the cable can restore
+the bridge and relaunch the Android receiver automatically.
 
 ## Requirements
 
-| | macOS Host | Android Client |
-|---|---|---|
-| **OS** | macOS 13 (Ventura)+ | Android 8.0 (API 26)+ |
-| **Hardware** | Apple Silicon or Intel | H.265 hardware decoder |
-| **USB mode** | USB-C port + `adb` (`brew install android-platform-tools`) | USB-C cable + USB Debugging enabled |
-| **Wireless mode** | Same WiFi network as the tablet (5 GHz recommended) | Camera (for QR scan) + Google Play Services (for ML Kit barcode) |
+- macOS 13 or later on Apple Silicon or Intel
+- Android 8 / API 26 or later
+- A USB data cable
+- ADB for USB mode (`brew install android-platform-tools`)
+- USB debugging enabled and authorized on the tablet
+- Screen Recording permission for the Mac app
+- Accessibility permission if tablet touch should control macOS
 
----
+## Install
 
-## Installation
+When a release is available, download the Mac DMG, Android APK, and
+`SHA256SUMS` from
+[GitHub Releases](https://github.com/aaditagrawal/telemachus/releases).
 
-Download the latest release from [**GitHub Releases**](https://github.com/tranvuongquocdat/SideScreen/releases):
-
-- **macOS**: Download `.dmg`, open it, drag Side Screen to Applications
-- **Android**: Download `.apk`, install on your tablet (enable "Unknown sources" if needed). Port forwarding is handled automatically by the Mac app.
-
-> **⚠️ macOS Gatekeeper**
-> If macOS says the app is "damaged", open Terminal and run:
-> ```bash
-> sudo xattr -cr /Applications/SideScreen.app
-> ```
-> Then open the app again. This is needed because the app is not notarized with an Apple Developer certificate.
-
-> **⚠️ ADB Required**
-> The Mac app needs `adb` to communicate with your Android device. If the app doesn't show "Running" after launch, you likely need to install ADB:
->
-> 1. Install Homebrew (if you don't have it):
->    ```bash
->    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
->    ```
-> 2. Install ADB:
->    ```bash
->    brew install --cask android-platform-tools
->    ```
-
-<details>
-<summary><strong>Build from source (for developers)</strong></summary>
+Verify the downloads:
 
 ```bash
-git clone https://github.com/tranvuongquocdat/SideScreen.git
-cd SideScreen
-
-# macOS
-cd MacHost && swift build -c release
-
-# Android
-cd AndroidClient && ./gradlew assembleDebug
+shasum -a 256 -c SHA256SUMS
 ```
-</details>
 
----
+### macOS
 
-## Usage
+1. Open `Telemachus-<version>-mac-universal.dmg`.
+2. Drag `Telemachus.app` to `/Applications`.
+3. Launch the installed copy.
+4. Grant Screen Recording.
+5. Grant Accessibility only if tablet touch should control the Mac.
+6. Reopen Telemachus after changing either permission.
 
-### USB mode (default — lowest latency)
+A filename containing `unsigned-source-build` is an ad-hoc-signed,
+non-notarized prerelease. macOS may require **System Settings → Privacy &
+Security → Open Anyway**. Only do this when the checksum matches the published
+release.
 
-1. Connect tablet to Mac via **USB-C**
-2. Launch **Side Screen** on Mac (runs in menu bar — port forwarding is set up automatically)
-3. Open **Side Screen** on tablet → keep on the **USB** tab → tap **Connect**
-4. Done — drag windows to your new display
+### Android
 
-### Wireless mode (new in 0.8.0 — no cable)
+Open `Telemachus-<version>-android.apk` on the tablet, or install it with ADB:
 
-1. Launch **Side Screen** on Mac → toggle to the **Wireless** tab → a QR code appears
-2. Open **Side Screen** on tablet → switch to the **Wireless** tab → tap **Scan QR Code** → grant camera permission → aim at the QR on the Mac
-3. The tablet remembers the Mac. Subsequent launches auto-reconnect — no rescan.
-
-Wireless mode requires both devices to be on the same WiFi network. **5 GHz is strongly recommended** — 2.4 GHz can introduce noticeable jitter on dynamic content. If you need to revoke access, click **Reset Token (forget all)** on the Mac and re-pair each tablet.
-
-USB mode remains the lowest-latency option for drawing or fast-paced gaming. Wireless adds 10–50 ms depending on WiFi quality.
-
-### Headless mode (new in 0.11.0 — no Mac interaction)
-
-In Settings → Startup, turn on **Launch at Login** and **Auto-start streaming on launch**, then pick the **Startup mode** (USB or Wireless). On your next login the server starts automatically — just open Side Screen on the tablet and tap Connect (USB) or Reconnect (Wireless).
-
-First-time setup still needs a screen once to grant Screen Recording permission; after that the Mac runs fully headless. For wireless headless use, give the Mac a static IP or DHCP reservation, and consider enabling macOS Screen Sharing as a fallback way in.
-
----
-
-## Configuration
-
-| Setting | Options | Default |
-|---------|---------|---------|
-| Resolution | 720p to 8K, 30+ presets + custom | 1920x1200 |
-| Frame Rate | 30, 60, 90, 120 FPS | 120 |
-| Bitrate | 20–5000 Mbps | 1000 Mbps |
-| Quality | Ultra Low, Low, Medium, High | Ultra Low |
-| HiDPI (Retina) | On/Off | Off |
-| Gaming Boost | On/Off (1 Gbps, 120 Hz) | Off |
-| Touch Input | On/Off | On |
-
----
-
-## Troubleshooting
-
-<details>
-<summary><strong>"SideScreen is damaged" on macOS</strong></summary>
-
-This happens because the app is not notarized by Apple. Run this command to fix it:
 ```bash
-sudo xattr -cr /Applications/SideScreen.app
+adb install -r Telemachus-<version>-android.apk
 ```
-Then open the app again.
-</details>
 
-<details>
-<summary><strong>"Connection refused" on Android</strong></summary>
+If Android reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the installed copy was
+signed with a different key. Uninstalling it removes Telemachus settings and
+wireless pairing:
 
-The Mac app sets up `adb reverse` automatically when streaming starts. If it still fails, make sure `adb` is installed (via Android SDK or Homebrew: `brew install android-platform-tools`) and your device has USB debugging enabled.
-</details>
+```bash
+adb uninstall dev.telemachus.display
+adb install Telemachus-<version>-android.apk
+```
 
-<details>
-<summary><strong>High latency or stuttering</strong></summary>
+## First USB connection
 
-- Lower resolution or frame rate
-- Ensure H.265 hardware codec support on your device
-- For USB mode, use a high-quality USB-C cable (not charge-only)
-- For wireless mode, ensure both devices are on **5 GHz WiFi**, not 2.4 GHz; reduce refresh rate to 60 Hz if jitter persists
-</details>
+1. On Android, open **Settings → About tablet → Software information** and tap
+   **Build number** seven times.
+2. Enable **USB debugging** in **Developer options**.
+3. Connect a data-capable cable and accept the Mac's RSA authorization prompt.
+4. Confirm that `adb devices` lists the tablet as `device`.
+5. Launch Telemachus on both devices.
+6. On the Mac, choose **New extended display** or **Current Mac display**.
+7. Connect from the Android app in USB mode.
 
-<details>
-<summary><strong>Wireless: "Couldn't reach Mac" / connection times out</strong></summary>
+If automatic setup is not active, run:
 
-- Both devices must be on the same WiFi network (and same subnet — some mesh routers isolate "guest" devices)
-- Click **Start** on the Mac before scanning the QR — the listener only binds when the server is running
-- If the Mac changes WiFi or its LAN IP, scan a fresh QR (the cached one points to the old address)
-- macOS may prompt for **Local Network** permission on first wireless toggle — grant it; without it, LAN inbound is silently dropped
-</details>
+```bash
+./scripts/setup-usb.sh
+```
 
-<details>
-<summary><strong>Wireless: "Re-pair required" after restart / reinstall</strong></summary>
+Enable **Launch at Login** for unattended use. **Auto-start streaming** defaults
+on, and USB is the default startup mode.
 
-The Mac's auth token resets when you click **Reset Token (forget all)** or reinstall the app. Tap **Scan QR Code** on the Android client and scan the new QR shown on the Mac.
-</details>
+## Build from source
 
-<details>
-<summary><strong>Virtual display not appearing</strong></summary>
+Source builds require a full Xcode/Swift toolchain, JDK 17, Android SDK 34, and
+Android platform tools:
 
-Grant Screen Recording permission: **System Preferences → Privacy & Security → Screen Recording → Enable Side Screen**
-</details>
+```bash
+git clone https://github.com/aaditagrawal/telemachus.git
+cd telemachus
+./scripts/build_mac.sh
+./scripts/build_android.sh
+./scripts/install_android.sh
+```
 
----
+Install the Mac build in `/Applications` before granting permissions. macOS
+associates Screen Recording and Accessibility permission with that app
+identity.
 
-## Contributing
+## Tested configuration
 
-Contributions are welcome!
+The primary development tablet is a Samsung SM-P610:
 
-- ⭐ **Star** this repo to help others discover it
-- 🐛 **Report bugs** via [Issues](https://github.com/tranvuongquocdat/SideScreen/issues)
-- 💡 **Suggest features** via [Issues](https://github.com/tranvuongquocdat/SideScreen/issues)
-- 🔧 **Submit PRs** — see [CONTRIBUTING.md](CONTRIBUTING.md)
+- 2000×1200 landscape panel at 60 Hz
+- Exynos hardware HEVC/H.264 decoding
+- USB Type-C operating at USB 2.0 High Speed
 
----
+The default stream is 2000×1200 at 60 Hz and 35 Mb/s HEVC. Gaming Boost uses
+45 Mb/s. Both fit comfortably within USB 2.0 bandwidth while avoiding the
+latency and thermal cost of oversized buffers.
 
-## Support
+Other Android 8+ tablets can work with compatible hardware HEVC or H.264
+decoders, but they have not all received the same device-level latency,
+thermal, and reconnect testing.
 
-If Side Screen is useful to you, consider supporting development:
+## Wireless mode
 
-<div align="center">
+Select Wireless in the Mac app, start streaming, and scan the displayed QR code
+from Android. The QR contains the Mac address, port, and a random 256-bit token.
+Non-loopback clients are rejected unless wireless mode is active and the token
+matches.
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/tranvuongqk)
-[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/tranvuongquocdat)
-[![VietQR](https://img.shields.io/badge/Vietnam-VietQR-DA251D?style=for-the-badge&logoColor=white)](https://sidescreen.dev/donate.html)
+The connection is authenticated but not encrypted. Screen content, telemetry,
+touch events, and the token may be visible to a passive network observer. Use
+wireless mode only on a trusted LAN and never expose its listener through public
+port forwarding. See [docs/threat-model.md](docs/threat-model.md).
 
-</div>
+## Latency design
 
-🇻🇳 Vietnamese users — scan VietQR for a local bank transfer (no international fees) at [sidescreen.dev/donate](https://sidescreen.dev/donate.html).
+Telemachus optimizes for recency rather than queueing every frame:
 
----
+- ScreenCaptureKit queue depth is two.
+- Only one encode operation may wait.
+- TCP has Nagle's algorithm disabled.
+- Only one video frame may be in flight.
+- One dependency-safe successor may wait.
+- Broken P-frame backlogs are discarded and replaced with a fresh keyframe.
+- Android discards decoded output that is already more than 50 ms stale.
+
+Diagnostics report capture-to-send age, decoder time, RTT, FPS, bitrate, and
+drops. Measuring true glass-to-glass latency still requires an external
+high-speed camera or photodiode because Mac and tablet clocks are not
+synchronized tightly enough for a trustworthy one-way measurement.
+
+## Development
+
+```bash
+cd MacHost
+swift test
+swift run Telemachus --transport-self-test
+
+cd ../AndroidClient
+./gradlew testDebugUnitTest lintDebug assembleDebug
+
+cd ..
+./scripts/run-capture-cadence-benchmark.sh --duration=15 --cg-only
+```
+
+Use a full Xcode installation for the complete Mac test suite. The transport
+self-test exercises the production server over loopback.
+
+## Attribution
+
+### SideScreen
+
+Telemachus is a direct MIT-licensed fork—not a clean-room
+reimplementation—of
+[SideScreen](https://github.com/tranvuongquocdat/SideScreen), created by
+[Tran Vuong Quoc Dat](https://github.com/tranvuongquocdat) and developed with
+the SideScreen contributors.
+
+SideScreen established the architecture Telemachus continues to use:
+
+- macOS virtual displays through private `CGVirtualDisplay` APIs
+- ScreenCaptureKit capture with CGDisplayStream compatibility paths
+- VideoToolbox HEVC/H.264 hardware encoding
+- TCP transport over LAN and USB through `adb reverse`
+- Android MediaCodec decoding into a low-overhead SurfaceView
+- wireless discovery and QR/token pairing
+- tablet-to-Mac touch and pointer forwarding
+- the original host, receiver, protocol, settings, and connection lifecycle
+
+Telemachus would not exist without that work. Credit for those ideas and
+implementations belongs to Tran Vuong Quoc Dat and every SideScreen
+contributor. The original copyright and MIT License notice remain in
+[LICENSE](LICENSE). Additional lineage and dependency notices are in
+[NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Attribution is also included in both applications and packaged release
+materials.
+
+### Why maintain this fork?
+
+SideScreen is a general Mac-to-Android display project. Telemachus focuses on a
+USB-first workstation: a Mac mini running long Codex and Computer Use tasks,
+with an otherwise idle Android tablet kept beside it as an immediately
+available monitor.
+
+The fork prioritizes appliance-like wired operation, predictable reconnection,
+observable latency, stable 60 Hz delivery, and unattended recovery. Wireless
+support remains available but is secondary to USB/ADB.
+
+### What Telemachus changes
+
+- Streams the current main display or an existing Screen Sharing display
+- Automates ADB forwarding, receiver launch, reconnect, and login startup
+- Bounds every frame queue and recovers quickly from stale dependency chains
+- Adds live transport, decoder, frame-age, and drop diagnostics
+- Preserves aspect ratio and maps touch correctly through letterboxing
+- Falls back to H.264 when HEVC hardware decoding is unavailable or broken
+- Adds permission onboarding and complete disconnected/loading/error states
+- Adds privacy, security, release, licensing, and CI/CD hardening
+- Uses the distinct Telemachus Companion Screens identity
+
+The repository preserves SideScreen's privacy-sanitized lineage and original
+authorship. Telemachus-specific development is represented by one consolidated
+fork commit.
+
+## Documentation
+
+- [Security policy](SECURITY.md)
+- [Privacy](PRIVACY.md)
+- [Threat model](docs/threat-model.md)
+- [Wire protocol](docs/protocol.md)
+- [Release guide](docs/releasing.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
 
 ## License
 
-[MIT License](LICENSE) — free for personal and commercial use.
-
----
-
-<div align="center">
-
-Made with ❤️ by **Tran Vuong Quoc Dat**
-
-[Report Bug](https://github.com/tranvuongquocdat/SideScreen/issues) · [Request Feature](https://github.com/tranvuongquocdat/SideScreen/issues) · [Discussions](https://github.com/tranvuongquocdat/SideScreen/discussions)
-
-</div>
+Telemachus is available under the [MIT License](LICENSE).

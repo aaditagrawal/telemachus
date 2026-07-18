@@ -1,41 +1,17 @@
-# Website Assets
+# Website assets
 
-Assets cho Side Screen landing page.
+These images support the Telemachus landing page.
 
----
+Before replacing or adding an asset:
 
-## Files cần có
+- record its author and license here;
+- remove device names, network addresses, tokens, and other private data;
+- do not include payment QR codes or personal financial details; and
+- optimize the exported image for the web.
 
-| File | Kích thước | Nguồn |
-|------|------------|-------|
-| `icon.png` | 128x128 | Copy từ `resources/logo/sidescreen-icon.png` và resize |
-| `hero-screenshot.png` | 1920x1080 | Copy từ `resources/screenshots/hero.png` |
-| `favicon.ico` | 32x32 | Generate từ icon.png |
+`main_logo.png` is the Telemachus Companion Screens web export. It was created
+from an original Telemachus brief without SideScreen artwork as an input.
 
----
-
-## Cách tạo favicon
-
-**Online tool:**
-1. Đi tới [favicon.io](https://favicon.io/favicon-converter/)
-2. Upload `icon.png`
-3. Download và đặt vào thư mục này
-
-**Hoặc dùng ImageMagick:**
-```bash
-convert icon.png -resize 32x32 favicon.ico
-```
-
----
-
-## Sau khi có đủ assets
-
-Update `website/index.html`:
-```html
-<link rel="icon" href="./assets/icon.png">
-```
-
-Thay placeholder image:
-```html
-<img src="./assets/hero-screenshot.png" alt="Side Screen Demo">
-```
+Inherited SideScreen screenshots were removed before public launch because they
+showed obsolete branding, ports, and performance claims. Add only current
+Telemachus captures that have been reviewed for private content and metadata.

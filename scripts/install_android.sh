@@ -4,6 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APK_PATH="$ROOT_DIR/AndroidClient/app/build/outputs/apk/debug/app-debug.apk"
+. "$SCRIPT_DIR/android-env.sh"
 
 echo "📱 Installing Android app..."
 
@@ -13,25 +14,35 @@ if [ ! -f "$APK_PATH" ]; then
     "$SCRIPT_DIR/build_android.sh"
 fi
 
-# Check ADB connection
-if ! adb devices | grep -q "device$"; then
-    echo "❌ No Android device found via ADB"
-    echo "   Please connect your device via USB and enable USB debugging"
-    exit 1
-fi
+adb_require_single_device
 
 # Install APK
-adb install -r "$APK_PATH"
+if ! INSTALL_OUTPUT="$(adb_cmd install -r "$APK_PATH" 2>&1)"; then
+    printf '%s\n' "$INSTALL_OUTPUT" >&2
+    if printf '%s\n' "$INSTALL_OUTPUT" | grep -q INSTALL_FAILED_UPDATE_INCOMPATIBLE; then
+        echo >&2
+        echo "The installed app was signed with a different key." >&2
+        echo "Uninstalling will delete Telemachus settings and wireless pairing." >&2
+        echo "If that is acceptable, run:" >&2
+        echo "  adb -s $ANDROID_SERIAL uninstall dev.telemachus.display" >&2
+        echo "Then run this installer again." >&2
+    fi
+    exit 1
+fi
+printf '%s\n' "$INSTALL_OUTPUT"
 
 echo ""
 echo "✅ App installed successfully!"
 echo ""
 echo "📲 Setting up USB port forwarding..."
-adb reverse --remove tcp:8888 2>/dev/null || true
-adb reverse tcp:8888 tcp:8888
+adb_cmd reverse --remove tcp:54321 2>/dev/null || true
+adb_cmd reverse tcp:54321 tcp:54321
 
-echo "✅ Port 8888 forwarded"
+echo "✅ Port 54321 forwarded"
+adb_cmd shell am start -a android.intent.action.MAIN \
+    -n dev.telemachus.display/.MainActivity \
+    --ez auto_connect true >/dev/null
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Ready! Open 'Side Screen' on your Android device"
+echo "Ready! Telemachus was launched on your Android device"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,11 +1,13 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/android-env.sh"
+
 echo "🔧 Setting up USB port forwarding..."
 
-# Check ADB connection
-if ! adb devices | grep -q "device$"; then
-    echo "❌ No Android device found via ADB"
+if ! adb_require_single_device; then
+    echo "❌ No unique authorized Android device found via ADB"
     echo ""
     echo "Troubleshooting:"
     echo "  1. Connect device via USB cable"
@@ -18,21 +20,21 @@ fi
 
 echo "  ✓ Device connected"
 
-# Remove existing reverse
-echo "  Clearing existing port forwards..."
-adb reverse --remove-all 2>/dev/null || true
-sleep 0.5
+# Remove only Telemachus's reverse mapping. Other development tools may own
+# additional mappings on the same device.
+echo "  Clearing Telemachus's existing port forward..."
+adb_cmd reverse --remove tcp:54321 2>/dev/null || true
 
 # Setup new reverse
-echo "  Setting up port 8888..."
-adb reverse tcp:8888 tcp:8888
+echo "  Setting up port 54321..."
+adb_cmd reverse tcp:54321 tcp:54321
 
 # Verify
-if adb reverse --list | grep -q "tcp:8888"; then
+if adb_cmd reverse --list | grep -q "tcp:54321"; then
     echo ""
     echo "✅ USB port forwarding active!"
     echo ""
-    adb reverse --list
+    adb_cmd reverse --list
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Ready to connect. Make sure Mac app is running."

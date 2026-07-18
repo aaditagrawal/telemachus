@@ -1,9 +1,11 @@
 import Foundation
 import AppKit
 
-print("🚀 Side Screen starting...")
+print("🚀 Telemachus starting...")
 
-// No args needed
+if CommandLine.arguments.contains("--transport-self-test") {
+    exit(TransportSelfTest.run() ? EXIT_SUCCESS : EXIT_FAILURE)
+}
 
 // Entry point
 let app = NSApplication.shared
@@ -15,9 +17,9 @@ let mainMenu = NSMenu()
 let appMenu = NSMenu()
 let appMenuItem = NSMenuItem()
 appMenuItem.submenu = appMenu
-appMenu.addItem(NSMenuItem(title: "About Side Screen", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+appMenu.addItem(NSMenuItem(title: "About Telemachus", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
 appMenu.addItem(NSMenuItem.separator())
-appMenu.addItem(NSMenuItem(title: "Quit Side Screen", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+appMenu.addItem(NSMenuItem(title: "Quit Telemachus", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 mainMenu.addItem(appMenuItem)
 
 // Edit menu (for standard text editing shortcuts)

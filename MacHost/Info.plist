@@ -3,18 +3,26 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Side Screen</string>
+    <string>Telemachus</string>
     <key>CFBundleIdentifier</key>
-    <string>com.sidescreen.app</string>
+    <string>dev.telemachus.display</string>
     <key>CFBundleVersion</key>
-    <string>0.7.0</string>
+    <string>0.12.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.7.0</string>
+    <string>0.12.0</string>
+    <key>CFBundleGetInfoString</key>
+    <string>Telemachus — a fork of SideScreen</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Telemachus contributors, 2026. Forked from SideScreen by Tran Vuong Quoc Dat and contributors.</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Telemachus needs screen recording access to stream a Mac display to your Android tablet.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Telemachus uses the local network when Wireless mode is selected.</string>
 </dict>
 </plist>

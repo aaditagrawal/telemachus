@@ -1,422 +1,401 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Side Screen - Turn Your Tablet into a Second Display for Mac</title>
+    <title>Telemachus — Use an Android tablet as a Mac display</title>
     <meta name="description"
-        content="Transform your Android tablet into a second display for macOS — USB-C or wireless over WiFi. Under 30ms latency with async pipeline, hardware H.265 acceleration, HiDPI Retina support, Universal Binary for Apple Silicon & Intel, gaming ready. Free and open source.">
+        content="Telemachus is a SideScreen fork for turning an Android tablet into an extended or mirrored macOS display over USB/ADB.">
     <meta name="keywords"
-        content="second display mac, android tablet display, usb-c display, virtual display macos, dual monitor mac, tablet second screen, hidpi retina mac display, apple silicon intel universal binary">
-    <meta property="og:title" content="Side Screen - Second Display for Mac">
+        content="android tablet display, mac second display, usb display, adb display, virtual display macos">
+    <meta property="og:title" content="Telemachus — Android tablet display for Mac">
     <meta property="og:description"
-        content="Transform your Android tablet into a second display for macOS. Under 30ms latency, hardware accelerated, gaming ready.">
+        content="A hardware-accelerated Mac-to-Android display stream, optimized for USB and current frames.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://sidescreen.dev">
-    <meta property="og:image" content="./assets/hero-screenshot.jpg">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
+    <meta property="og:image" content="./assets/main_logo.png">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Side Screen - Second Display for Mac">
-    <meta name="twitter:description" content="Transform your Android tablet into a second display for macOS. Under 30ms latency, hardware accelerated, gaming ready.">
-    <meta name="twitter:image" content="./assets/hero-screenshot.jpg">
-    <meta name="theme-color" content="#007AFF">
-    <link rel="canonical" href="https://sidescreen.dev">
+    <meta name="twitter:title" content="Telemachus — Android tablet display for Mac">
+    <meta name="twitter:description"
+        content="Use an Android tablet as an extended or mirrored macOS display over USB/ADB.">
+    <meta name="twitter:image" content="./assets/main_logo.png">
+    <meta name="theme-color" content="#65D992">
+
+    <meta name="repository-url" content="https://github.com/aaditagrawal/telemachus">
+
     <link rel="icon" href="./assets/main_logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 
-    <!-- Structured Data -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "Side Screen",
-        "description": "Transform your Android tablet into a second display for macOS — USB-C cable or wireless over WiFi (QR-pair once, auto-reconnect).",
+        "name": "Telemachus",
+        "description": "Use an Android tablet as an extended or mirrored display for macOS over USB/ADB or a trusted LAN.",
         "applicationCategory": "UtilitiesApplication",
-        "operatingSystem": "macOS, Android",
+        "operatingSystem": "macOS 13 or later; Android 8 or later",
         "offers": {
             "@type": "Offer",
             "price": "0",
             "priceCurrency": "USD"
-        },
-        "author": {
-            "@type": "Person",
-            "name": "Tran Vuong Quoc Dat"
         }
     }
     </script>
 </head>
 
 <body>
-    <!-- Header -->
     <header id="header">
         <div class="container header-container">
             <a href="#home" class="logo">
-                <img src="./assets/main_logo.png" alt="Side Screen Logo" width="32" height="32">
-                <span class="logo-text">Side Screen</span>
+                <img src="./assets/main_logo.png" alt="" width="32" height="32">
+                <span class="logo-text">Telemachus</span>
             </a>
-            <nav>
+            <nav aria-label="Primary navigation">
                 <ul class="nav-links">
                     <li><a href="#features" class="nav-link">Features</a></li>
-                    <li><a href="#how-it-works" class="nav-link">How It Works</a></li>
+                    <li><a href="#lineage" class="nav-link">Lineage</a></li>
+                    <li><a href="#how-it-works" class="nav-link">Setup</a></li>
+                    <li><a href="#security" class="nav-link">Security</a></li>
                     <li><a href="#faq" class="nav-link">FAQ</a></li>
-                    <li><a href="donate.html" target="_blank" rel="noopener noreferrer" class="nav-link">Donate</a></li>
                 </ul>
             </nav>
             <div class="header-actions">
                 <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
-                    <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
+                    <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                    <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
                 </button>
-                <a href="https://github.com/tranvuongquocdat/SideScreen" target="_blank" rel="noopener noreferrer" class="btn btn-outline"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
-                <a href="#download" class="btn btn-primary">Download</a>
-                <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle mobile menu">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="3" y1="12" x2="21" y2="12"></line>
-                        <line x1="3" y1="6" x2="21" y2="6"></line>
-                        <line x1="3" y1="18" x2="21" y2="18"></line>
-                    </svg>
+                <a data-repository-link data-repository-path="" target="_blank"
+                    rel="noopener noreferrer" class="btn btn-outline" hidden>Source</a>
+                <a href="#download" class="btn btn-primary">Get started</a>
+                <button class="mobile-menu-btn" id="mobile-menu-btn"
+                    aria-label="Toggle mobile menu" aria-expanded="false">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"></path></svg>
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero section" id="home">
-        <div class="container">
-            <div class="hero-content">
-                <div class="privacy-badge">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                    </svg>
-                    <span>Privacy First · Open Source</span>
+    <main>
+        <section class="hero section" id="home">
+            <div class="container">
+                <div class="hero-content">
+                    <a class="fork-badge"
+                        href="https://github.com/tranvuongquocdat/SideScreen"
+                        target="_blank" rel="noopener noreferrer">
+                        <span class="fork-badge-mark" aria-hidden="true">↗</span>
+                        <span>A fork of SideScreen</span>
+                    </a>
+                    <div class="privacy-highlights">
+                        <span class="privacy-highlight">USB first</span>
+                        <span class="privacy-highlight">Hardware codecs</span>
+                        <span class="privacy-highlight">Apple Silicon + Intel</span>
+                        <span class="privacy-highlight">Extended or mirrored</span>
+                    </div>
+                    <h1 class="hero-title">Your Android tablet, as a Mac display.</h1>
+                    <p class="hero-subtitle">
+                        Telemachus creates a virtual desktop or streams an existing Mac
+                        display. USB uses ADB port forwarding; wireless is available for
+                        private, trusted LANs.
+                    </p>
+                    <div class="hero-actions">
+                        <a href="#download" class="btn btn-primary btn-large">Build or download</a>
+                        <a href="#features" class="btn btn-outline btn-large">See how it works</a>
+                    </div>
+                    <p class="support-callout">
+                        Designed to discard stale work and favor the newest frame.
+                        Glass-to-glass latency has not yet been independently measured.
+                    </p>
                 </div>
-
-                <div class="privacy-highlights">
-                    <span class="privacy-highlight">Native Performance</span>
-                    <span class="privacy-highlight">USB-C or Wireless</span>
-                    <span class="privacy-highlight">Universal Binary</span>
-                    <span class="privacy-highlight">HiDPI Ready</span>
+                <div class="hero-visual">
+                    <div class="hero-image-container hero-icon-container">
+                        <img src="./assets/main_logo.png"
+                            alt="Telemachus laptop and companion tablet icon"
+                            loading="eager">
+                    </div>
                 </div>
+            </div>
+        </section>
 
-                <h1 class="hero-title">Your tablet, your second screen.</h1>
-                <p class="hero-subtitle">
-                    Transform your Android tablet into a second display for your Mac — plug in over USB-C, or pair once with a QR scan and stream wirelessly over WiFi.
-                    Under 30ms latency on USB, hardware accelerated, gaming ready.
+        <section class="lineage section" id="lineage">
+            <div class="container lineage-shell">
+                <div class="lineage-intro">
+                    <p class="eyebrow">Project lineage</p>
+                    <h2>Built forward from SideScreen.</h2>
+                    <p>
+                        Telemachus began as a fork of SideScreen by Tran Vuong
+                        Quoc Dat and its contributors. Their MIT-licensed work
+                        established the core virtual-display, capture, encoding,
+                        ADB/TCP transport, Android decoding, wireless, and touch path.
+                    </p>
+                    <a class="lineage-link"
+                        href="https://github.com/tranvuongquocdat/SideScreen"
+                        target="_blank" rel="noopener noreferrer">
+                        Visit the original SideScreen project <span aria-hidden="true">↗</span>
+                    </a>
+                </div>
+                <div class="lineage-grid">
+                    <article class="lineage-card lineage-card-foundation">
+                        <span class="lineage-label">SideScreen foundation</span>
+                        <h3>The working display pipeline.</h3>
+                        <p>
+                            Virtual displays, hardware video transport, Android
+                            playback, Wi-Fi pairing, touch input, and headless startup.
+                        </p>
+                    </article>
+                    <article class="lineage-card lineage-card-telemachus">
+                        <span class="lineage-label">Telemachus direction</span>
+                        <h3>Wired appliance behavior.</h3>
+                        <p>
+                            Existing-display mirroring, automatic client launch,
+                            fixed-rate pacing, bounded latency, capture recovery,
+                            clearer onboarding, and the Companion Screens identity.
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="features section" id="features">
+            <div class="container">
+                <h2 class="section-title">A real display path, tuned for recency.</h2>
+                <p class="section-subtitle">
+                    Hardware encode and decode, bounded queues, and observable performance.
                 </p>
+                <div class="special-features-grid">
+                    <div class="special-feature-item text-only">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Extend or mirror</h3>
+                            <p class="special-feature-description">
+                                Create an additional macOS desktop, or send the current
+                                main display to the tablet without stretching its aspect ratio.
+                            </p>
+                        </div>
+                    </div>
 
-                <div class="hero-actions">
-                    <a href="#download" class="btn btn-primary btn-large download-btn">Get It Now</a>
-                    <a href="#features" class="btn btn-outline btn-large">See Features</a>
-                </div>
+                    <div class="special-feature-item text-only">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Measured in the app</h3>
+                            <p class="special-feature-description">
+                                Live FPS, bitrate, RTT, decoder time, and dropped-frame
+                                counters make performance visible. External high-speed
+                                measurement is still required for a trustworthy
+                                glass-to-glass latency number.
+                            </p>
+                        </div>
+                    </div>
 
-                <p class="support-callout">Built by an indie developer.</p>
-                <div class="support-links">
-                    <a href="donate.html" target="_blank" rel="noopener noreferrer" class="btn btn-coffee">Support Development</a>
-                    <a href="https://github.com/tranvuongquocdat/SideScreen" target="_blank" rel="noopener noreferrer" class="btn btn-outline"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
-                    <a href="https://discord.gg/4aAPvPFz8d" target="_blank" rel="noopener noreferrer" class="btn btn-outline"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:6px"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>Discord</a>
-                </div>
-            </div>
+                    <div class="special-feature-item text-only">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Adjustable for the device</h3>
+                            <p class="special-feature-description">
+                                Choose resolution, refresh rate, bitrate, orientation,
+                                HiDPI, and quality. HEVC is preferred with H.264 fallback
+                                for compatible AVC-only tablets.
+                            </p>
+                        </div>
+                    </div>
 
-            <div class="hero-visual">
-                <div class="hero-image-container">
-                    <img src="./assets/hero-screenshot.jpg" alt="Side Screen — MacBook with Android tablet as second display via USB-C" loading="eager"/>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Features Section -->
-    <section class="features section" id="features">
-        <div class="container">
-            <h2 class="section-title">One seamless experience.</h2>
-            <p class="section-subtitle">Built for performance, designed for simplicity</p>
-
-            <div class="special-features-grid">
-                <!-- Feature 1: Virtual Display — text left, image right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">Virtual Display</h3>
-                        <p class="special-feature-description">Create a true virtual monitor on your Mac. Drag windows to your tablet just like a real display — not mirroring, but extending your workspace.</p>
-                    </div>
-                    <div class="special-feature-media">
-                        <img src="./assets/feature-virtual-display.png" alt="macOS Display Preferences showing SideScreen virtual display" loading="lazy"/>
-                    </div>
-                </div>
-
-                <!-- Feature 2: Performance — image left, text right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">Under 30ms Latency</h3>
-                        <p class="special-feature-description">Async pipeline with hardware H.265 on both ends. Buttery smooth frames with Choreographer vsync alignment.</p>
-                    </div>
-                    <div class="special-feature-media">
-                        <img src="./assets/android-performance.png" alt="Side Screen streaming with stats overlay showing FPS and bitrate" loading="lazy"/>
-                    </div>
-                </div>
-
-                <!-- Feature 3: Customizable — text left, image right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">Fully Customizable</h3>
-                        <p class="special-feature-description">Resolution up to 8K, 30–120 FPS, Gaming Boost mode, HiDPI (Retina) for pixel-perfect sharpness. Fine-tune everything from the Mac app.</p>
-                    </div>
-                    <div class="special-feature-media special-feature-media-pair">
-                        <img src="./assets/mac-settings-1.png" alt="macOS Settings — Display configuration" loading="lazy"/>
-                        <img src="./assets/mac-settings-2.png" alt="macOS Settings — Streaming and status" loading="lazy"/>
-                    </div>
-                </div>
-
-                <!-- Feature 4: Android app — image left, text right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">USB or Wireless, Your Pick</h3>
-                        <p class="special-feature-description">Plug in USB-C for the lowest latency, or scan a one-time QR code from the Mac to pair wirelessly over WiFi — every launch after that auto-reconnects. Touch input with prediction works the same way in both modes.</p>
-                    </div>
-                    <div class="special-feature-media">
-                        <img src="./assets/android-settings.png" alt="Android app connection screen with checklist" loading="lazy"/>
-                    </div>
-                </div>
-
-                <!-- Feature 5: Wireless — text left, image right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">Truly Wireless</h3>
-                        <p class="special-feature-description">No cable, no compromise. Pair once with a QR code and the tablet remembers the Mac — every future launch reconnects over WiFi automatically. The auth token is generated locally and stays on your Mac; reset it any time to revoke access.</p>
-                    </div>
-                    <div class="special-feature-media">
-                        <img src="./assets/wireless_feature.png" alt="Side Screen wireless connection in action" loading="lazy"/>
-                    </div>
-                </div>
-
-                <!-- Feature 6: Headless / portable Mac — image left, text right -->
-                <div class="special-feature-item">
-                    <div class="special-feature-content">
-                        <h3 class="special-feature-title">Headless / Portable Mac</h3>
-                        <p class="special-feature-description">Run a Mac with no display of its own — a Mac Studio or Mini on the go, or a laptop in clamshell — using the tablet as its only screen. Turn on Launch at Login and Auto-start streaming, and the Mac boots straight into serving the tablet, with nothing to press on the Mac.</p>
-                    </div>
-                    <div class="special-feature-media">
-                        <img src="./assets/launch_at_login_feature.png" alt="Side Screen Launch at Login and auto-start settings" loading="lazy"/>
+                    <div class="special-feature-item text-only">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Touch is optional</h3>
+                            <p class="special-feature-description">
+                                Use taps, drag, scroll, pinch, and long press, or disable
+                                input and use the tablet strictly as an output display.
+                                Accessibility permission is needed only for input.
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- How It Works Section -->
-    <section class="how-it-works section" id="how-it-works">
-        <div class="container">
-            <h2 class="section-title">Get started in 3 steps</h2>
-            <p class="section-subtitle">From download to second screen in under 5 minutes</p>
-
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <h3>Download & Install</h3>
-                    <p>Get Side Screen for your Mac and install the Android app on your tablet.</p>
-                </div>
-
-                <div class="step-arrow">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                        <polyline points="12 5 19 12 12 19"></polyline>
-                    </svg>
-                </div>
-
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <h3>Pick a connection</h3>
-                    <p><strong>USB-C</strong> — plug the cable in (port forwarding is automatic). Or <strong>Wireless</strong> — open the Mac's Wireless tab and scan the QR code with the Android app.</p>
-                </div>
-
-                <div class="step-arrow">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                        <polyline points="12 5 19 12 12 19"></polyline>
-                    </svg>
-                </div>
-
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <h3>Enjoy!</h3>
-                    <p>Stream starts immediately. Wireless pairings auto-reconnect on every future launch.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Download Section -->
-    <section class="download section" id="download">
-        <div class="container">
-            <h2 class="section-title">Download Side Screen</h2>
-            <p class="section-subtitle">Free and open source. Always.</p>
-
-            <div class="download-options">
-                <a href="https://github.com/tranvuongquocdat/SideScreen/releases/latest" target="_blank" rel="noopener noreferrer" class="download-card download-btn">
-                    <div class="download-icon">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                        </svg>
+        <section class="how-it-works section" id="how-it-works">
+            <div class="container">
+                <h2 class="section-title">One-time setup, then cable-driven use.</h2>
+                <p class="section-subtitle">
+                    Both devices run software; USB-C carries a compressed ADB stream,
+                    not DisplayPort video.
+                </p>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h3>Install both apps</h3>
+                        <p>Install the Mac host, Android client, and Android platform tools.</p>
                     </div>
-                    <h3>GitHub Releases</h3>
-                    <p class="download-version-text">Download from GitHub</p>
-                    <span class="download-action">Download</span>
-                </a>
-
-                <div class="download-card alt">
-                    <div class="download-icon">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="16 18 22 12 16 6"></polyline>
-                            <polyline points="8 6 2 12 8 18"></polyline>
-                        </svg>
+                    <div class="step-arrow" aria-hidden="true">→</div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h3>Grant once</h3>
+                        <p>Authorize USB debugging and macOS Screen Recording. Grant Accessibility only for touch.</p>
                     </div>
-                    <h3>Build from Source</h3>
-                    <p>Clone the repo and build yourself</p>
-                    <code class="download-code">git clone https://github.com/tranvuongquocdat/SideScreen</code>
+                    <div class="step-arrow" aria-hidden="true">→</div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h3>Connect</h3>
+                        <p>Plug in USB and connect. Launch-at-login and automatic ADB recovery can handle later reconnects.</p>
+                    </div>
                 </div>
             </div>
+        </section>
 
-            <div class="download-note">
-                <p><strong>macOS Gatekeeper:</strong> Open DMG, drag to Applications. If macOS says "damaged":</p>
-                <div class="download-cmd"><code>sudo xattr -cr /Applications/SideScreen.app</code><button class="copy-btn" onclick="copyCmd(this)">Copy</button></div>
-                <p style="margin-top: 1rem;"><strong>⚠️ ADB Required:</strong> The Mac app needs <code>adb</code> to communicate with your Android device. If the app doesn't show "Running", install ADB first:</p>
-                <p style="margin-top: 0.5rem;">1. Install Homebrew (if you don't have it):</p>
-                <div class="download-cmd"><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code><button class="copy-btn" onclick="copyCmd(this)">Copy</button></div>
-                <p style="margin-top: 0.5rem;">2. Install ADB:</p>
-                <div class="download-cmd"><code>brew install --cask android-platform-tools</code><button class="copy-btn" onclick="copyCmd(this)">Copy</button></div>
+        <section class="features section" id="security">
+            <div class="container">
+                <h2 class="section-title">Know the security boundary.</h2>
+                <p class="section-subtitle">
+                    USB is the recommended transport. Wireless is authenticated but
+                    currently unencrypted.
+                </p>
+                <div class="special-features-grid">
+                    <div class="special-feature-item">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Wireless: trusted LAN only</h3>
+                            <p class="special-feature-description">
+                                The QR credential, video, telemetry, and touch traffic are
+                                sent without encryption. Do not expose the port publicly or
+                                use wireless mode on a shared or hostile network.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="special-feature-item">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Private macOS API</h3>
+                            <p class="special-feature-description">
+                                Virtual-display creation uses unsupported
+                                <code>CGVirtualDisplay</code> APIs. A macOS update may
+                                change or break them, and App Store distribution is not
+                                expected.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="special-feature-item">
+                        <div class="special-feature-content">
+                            <h3 class="special-feature-title">Local QR scanning</h3>
+                            <p class="special-feature-description">
+                                Pairing codes are decoded locally with the open-source
+                                ZXing library. Telemachus does not operate an analytics,
+                                account, or cloud relay service.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
+        </section>
 
-            <div class="download-requirements">
-                <span class="download-requirement">macOS 14.0+</span>
-                <span class="download-requirement">Apple Silicon & Intel</span>
-                <span class="download-requirement">Android 8.0+</span>
+        <section class="download section" id="download">
+            <div class="container">
+                <h2 class="section-title">Download a release or build from source.</h2>
+                <p class="section-subtitle">
+                    Releases include checksums. The current Mac source build is ad-hoc
+                    signed and non-notarized, so it is explicitly marked as a prerelease.
+                </p>
+                <div class="download-options">
+                    <a data-repository-link data-repository-path="/releases"
+                        target="_blank" rel="noopener noreferrer"
+                        class="download-card" hidden>
+                        <div class="download-icon">↓</div>
+                        <h3>Release downloads</h3>
+                        <p>DMG, APK, legal notices, and SHA-256 checksums</p>
+                        <span class="download-action">View releases</span>
+                    </a>
+                    <div class="download-card alt">
+                        <div class="download-icon">&lt;/&gt;</div>
+                        <h3>Build from this checkout</h3>
+                        <p>macOS 13+, Android 8 / API 26+, JDK 17, Android SDK 34</p>
+                        <code class="download-code">./scripts/build_mac.sh &amp;&amp; ./scripts/build_android.sh</code>
+                    </div>
+                </div>
+                <div class="download-note">
+                    <p>
+                        Verify public downloads against <code>SHA256SUMS</code>.
+                        A filename containing <code>unsigned-source-build</code> is
+                        ad-hoc signed and not notarized. A future
+                        <code>mac-universal.dmg</code> is Developer ID signed, hardened,
+                        notarized, and stapled. Do not bypass a macOS security warning for
+                        an artifact whose provenance and checksum you have not verified.
+                    </p>
+                    <p style="margin-top: 1rem;">
+                        USB mode requires ADB:
+                        <code>brew install android-platform-tools</code>
+                    </p>
+                </div>
+                <div class="download-requirements">
+                    <span class="download-requirement">macOS 13+</span>
+                    <span class="download-requirement">Apple Silicon + Intel</span>
+                    <span class="download-requirement">Android 8+</span>
+                </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Donation Modal -->
-    <div id="donation-modal" class="modal-overlay">
-        <div class="modal-content">
-            <button class="modal-close" aria-label="Close modal">&times;</button>
-            <h2 class="modal-title">Love Side Screen?</h2>
-            <p class="modal-text">Side Screen is built by an indie developer and kept 100% free. If you find it useful, consider supporting development.</p>
-            <div class="modal-actions">
-                <a href="donate.html" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Support Development</a>
-                <button id="proceed-to-download" class="btn btn-outline">Continue to Download</button>
+        <section class="faq section" id="faq">
+            <div class="container">
+                <h2 class="section-title">Frequently asked questions</h2>
+                <div class="faq-list">
+                    <details class="faq-item">
+                        <summary>Is it plug and play?</summary>
+                        <p>
+                            After installing both apps and granting USB debugging and
+                            Screen Recording once, later USB reconnects can be automatic.
+                            A Mac host application is always required.
+                        </p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Does USB-C bandwidth guarantee 60 FPS?</summary>
+                        <p>
+                            No. The stream fits within USB 2.0 bandwidth at normal
+                            bitrates, but stable frame delivery also depends on capture
+                            cadence, hardware codecs, decoder scheduling, thermal limits,
+                            resolution, and backpressure.
+                        </p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Is wireless safe on public Wi-Fi?</summary>
+                        <p>
+                            No. The current bearer-token handshake is not encrypted.
+                            Use wireless only on a trusted private LAN and prefer USB.
+                        </p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Is every dependency documented?</summary>
+                        <p>
+                            The source is MIT licensed and the QR scanner uses
+                            Apache-2.0-licensed ZXing. Consult the third-party notice and
+                            review a generated dependency report before distributing a
+                            binary.
+                        </p>
+                    </details>
+                </div>
             </div>
-        </div>
-    </div>
+        </section>
+    </main>
 
-    <!-- FAQ Section -->
-    <section class="faq section" id="faq">
-        <div class="container">
-            <h2 class="section-title">Frequently Asked Questions</h2>
-
-            <div class="faq-list">
-                <details class="faq-item">
-                    <summary>Does it work wirelessly?</summary>
-                    <p>Yes — since 0.8.0. Open the Wireless tab on the Mac, scan the QR code with the Android app, and you're paired. Every launch after that auto-reconnects. Both devices need to be on the same WiFi (5 GHz strongly recommended). USB-C still gives the lowest latency for drawing or fast-paced gaming.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>macOS says "SideScreen is damaged"</summary>
-                    <p>This happens because the app isn't notarized by Apple. Open Terminal and run: <code>sudo xattr -cr /Applications/SideScreen.app</code>, then open the app again.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>What's the latency like?</summary>
-                    <p>USB-C: under 30 ms end-to-end with the async pipeline (hardware H.265 encoding, Choreographer vsync, TCP_NODELAY). Wireless adds 10–50 ms depending on WiFi quality — not noticeable for text/web/video, but USB still wins for drawing precision and fast gaming.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Is wireless mode safe on shared WiFi?</summary>
-                    <p>Each Mac generates a private 32-byte token on first wireless toggle, embedded in the QR. Only devices that scanned that QR can connect. If you ever want to revoke access (lost a tablet, switched WiFi, etc.), click <strong>Reset Token</strong> on the Mac — every paired device gets booted and must re-scan a fresh QR.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Does it work with iPad?</summary>
-                    <p>Currently, only Android tablets are supported. iOS support may be considered in the future.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Is it really free?</summary>
-                    <p>Yes! Side Screen is free and open source under the MIT license. If you find it useful, consider <a href="donate.html" target="_blank" rel="noopener noreferrer">supporting development</a>.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Do I need to run any terminal commands?</summary>
-                    <p>No! The Mac app automatically runs <code>adb reverse</code> to set up port forwarding when streaming starts. Just make sure <code>adb</code> is installed (via <code>brew install android-platform-tools</code>).</p>
-                </details>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
     <footer class="footer">
         <div class="container">
             <div class="footer-content">
                 <div class="footer-brand">
-                    <img src="./assets/main_logo.png" alt="Side Screen" width="32" height="32">
-                    <span>Side Screen</span>
+                    <img src="./assets/main_logo.png" alt="" width="32" height="32">
+                    <span>Telemachus</span>
                 </div>
-
                 <div class="footer-links">
-                    <a href="https://github.com/tranvuongquocdat/SideScreen" target="_blank" rel="noopener noreferrer"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
-                    <a href="https://discord.gg/4aAPvPFz8d" target="_blank" rel="noopener noreferrer"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>Discord</a>
-                    <a href="https://github.com/tranvuongquocdat/SideScreen/issues" target="_blank" rel="noopener noreferrer">Report Bug</a>
-                    <a href="https://github.com/tranvuongquocdat/SideScreen/graphs/contributors" target="_blank" rel="noopener noreferrer">Contributors</a>
-                    <a href="https://github.com/tranvuongquocdat/SideScreen/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">License</a>
-                    <a href="donate.html" target="_blank" rel="noopener noreferrer">Donate</a>
+                    <a data-repository-link data-repository-path="" target="_blank"
+                        rel="noopener noreferrer" hidden>Source</a>
+                    <a data-repository-link data-repository-path="/issues" target="_blank"
+                        rel="noopener noreferrer" hidden>Issues</a>
+                    <a href="#security">Security</a>
+                    <a href="#download">Downloads</a>
                 </div>
-
                 <p class="footer-copy">
-                    Made with &#10084; by Tran Vuong Quoc Dat.<br>
-                    Open source under MIT License.
+                    Telemachus is a fork of
+                    <a href="https://github.com/tranvuongquocdat/SideScreen"
+                        target="_blank" rel="noopener noreferrer">SideScreen</a>
+                    by Tran Vuong Quoc Dat and contributors. Their original MIT
+                    license and copyright notice remain preserved.
                 </p>
             </div>
         </div>
     </footer>
 
-    <!-- Toast Container -->
-    <div class="toast-container"></div>
-
     <script src="scripts.js"></script>
-    <script>
-        function copyCmd(btn) {
-            const code = btn.parentElement.querySelector('code');
-            navigator.clipboard.writeText(code.textContent).then(() => {
-                btn.textContent = 'Copied';
-                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-            });
-        }
-    </script>
-    <script>
-        // Fetch latest version
-        fetch('https://api.github.com/repos/tranvuongquocdat/SideScreen/releases/latest')
-            .then(r => r.json())
-            .then(d => {
-                const el = document.querySelector('.download-version-text');
-                if (el && d.tag_name) el.textContent = 'Download v' + d.tag_name + ' from GitHub';
-            })
-            .catch(() => {});
-
-    </script>
 </body>
-
 </html>

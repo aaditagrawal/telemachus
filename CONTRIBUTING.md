@@ -1,6 +1,6 @@
-# Contributing to Side Screen
+# Contributing to Telemachus
 
-Thank you for your interest in contributing to Side Screen! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Telemachus! This document provides guidelines and information for contributors.
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ Thank you for your interest in contributing to Side Screen! This document provid
 
 ## Code of Conduct
 
-Please be respectful and constructive in all interactions. We're building something together, and a positive environment helps everyone contribute their best work.
+Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ---
 
@@ -48,46 +48,53 @@ Documentation improvements are always welcome:
 - Add examples
 - Translate to other languages
 
-### Star the Repository
-
-The simplest way to help - star the repo to help others discover it!
-
----
-
 ## Development Setup
 
 ### Prerequisites
 
 **macOS Development:**
-- macOS 14 (Sonoma) or later
-- Xcode 15+ or Swift toolchain
+- macOS 13 (Ventura) or later
+- Xcode or a Swift 5.9+ toolchain
 - Swift 5.9+
 
 **Android Development:**
 - Android Studio Hedgehog or later
 - JDK 17
 - Android SDK 34
+- Android platform tools when testing a physical device
 
 ### Clone and Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/tranvuongquocdat/SideScreen.git
-cd SideScreen
+# From the Telemachus workspace
 
 # Build macOS app
 cd MacHost
-swift build
+swift test
+swift run Telemachus --transport-self-test
+swift build -c release
 
 # Build Android app
 cd ../AndroidClient
-./gradlew assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
+
+The repository build helper also discovers common macOS and Linux toolchain
+locations:
+
+```bash
+./scripts/build_android.sh
+```
+
+Set `JAVA_HOME` when JDK 17 is not the system default. Set `ANDROID_HOME` or
+`ANDROID_SDK_ROOT`, or create `AndroidClient/local.properties` with `sdk.dir`,
+when the SDK is installed outside a standard location. Set `ANDROID_SERIAL`
+before running device scripts when more than one Android device is connected.
 
 ### Project Structure
 
 ```
-SideScreen/
+Telemachus/
 ├── MacHost/                 # macOS Swift application
 │   └── Sources/             # Swift source files
 ├── AndroidClient/           # Android Kotlin application
@@ -176,9 +183,10 @@ Closes #42
 ### Submitting
 
 1. Ensure your code builds without errors
-2. Test your changes on real devices if possible
-3. Update documentation if needed
-4. Create a pull request with:
+2. Run the platform test, lint, and transport checks above
+3. Test streaming changes on real devices when possible
+4. Update protocol, privacy, or threat-model documentation when relevant
+5. Create a pull request with:
    - Clear description of changes
    - Link to related issue (if any)
    - Screenshots for UI changes
@@ -218,7 +226,8 @@ Include:
 ## Questions?
 
 If you have questions about contributing, feel free to:
-- Open a discussion on GitHub
 - Ask in an issue with the `question` label
 
-Thank you for contributing to Side Screen!
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+Thank you for contributing to Telemachus!

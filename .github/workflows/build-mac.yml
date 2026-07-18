@@ -6,25 +6,44 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  macos:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Build (Universal Binary)
+      - name: Unit tests
+        working-directory: MacHost
+        run: swift test
+
+      - name: Transport self-test
+        working-directory: MacHost
+        run: swift run Telemachus --transport-self-test
+
+      - name: Build universal release binary
+        working-directory: MacHost
         run: |
-          cd MacHost
           swift build -c release --arch arm64
           swift build -c release --arch x86_64
           mkdir -p .build/release-universal
           lipo -create \
-            .build/arm64-apple-macosx/release/SideScreen \
-            .build/x86_64-apple-macosx/release/SideScreen \
-            -output .build/release-universal/SideScreen
+            .build/arm64-apple-macosx/release/Telemachus \
+            .build/x86_64-apple-macosx/release/Telemachus \
+            -output .build/release-universal/Telemachus
+          lipo -archs .build/release-universal/Telemachus | grep -q arm64
+          lipo -archs .build/release-universal/Telemachus | grep -q x86_64
 
-      - name: Lint
-        run: |
-          brew install swiftlint
-          cd MacHost
-          swiftlint lint --config .swiftlint.yml --strict
+      - name: Install pinned SwiftLint
+        run: ./scripts/install-swiftlint.sh
+
+      - name: Swift lint
+        working-directory: MacHost
+        run: swiftlint lint --config .swiftlint.yml --strict

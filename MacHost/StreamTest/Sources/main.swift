@@ -10,9 +10,9 @@ setbuf(stderr, nil)
 // ============================================
 // Tests:
 //  1. Generate animated color bar test pattern
-//  2. Encode with H.265 (VideoToolbox) - same config as SideScreen
+//  2. Encode with H.265 (VideoToolbox) - same config as Telemachus
 //  3. Save raw bitstream to /tmp/streamtest.h265 (verify with ffplay)
-//  4. Stream via TCP to Android tablet (same protocol as SideScreen)
+//  4. Stream via TCP to Android tablet (same protocol as Telemachus)
 //
 // Usage:
 //   StreamTest              → encode + save H.265 file (no streaming)
@@ -29,11 +29,13 @@ let port: UInt16 = {
     return 5555
 }()
 
-let width = 1920
-let height = 1200
+// Exact current-main stream shape for the 3840x2160 Mac virtual display
+// aspect-fitted into the SM-P610's 2000x1200 panel.
+let width = 2000
+let height = 1124
 let frameRate = 60
-let bitrateMbps = 20
-let testDuration: TimeInterval = streamMode ? 300 : 5  // 5min stream, 5s file
+let bitrateMbps = 35
+let testDuration: TimeInterval = streamMode ? 300 : 3  // 5min stream, 3s file
 
 print("========================================")
 print("  StreamTest - Pipeline Tester")
@@ -67,6 +69,10 @@ if streamMode {
 
     server?.onClientDisconnected = {
         print("[EVENT] Client disconnected")
+    }
+
+    server?.onKeyframeRequested = {
+        encoder.requestKeyframe()
     }
 
     server?.start()

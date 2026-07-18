@@ -5,15 +5,16 @@ import CGVirtualDisplayBridge
 /// Manages virtual display creation and lifecycle using CGVirtualDisplay API
 class VirtualDisplayManager {
     private var virtualDisplay: CGVirtualDisplay?
+    private var adoptedDisplayID: CGDirectDisplayID?
     private var displayDescriptor: CGVirtualDisplayDescriptor?
     private var displaySettings: CGVirtualDisplaySettings?
 
     var displayID: CGDirectDisplayID? {
-        return virtualDisplay?.displayID
+        return virtualDisplay?.displayID ?? adoptedDisplayID
     }
 
     var isActive: Bool {
-        return virtualDisplay != nil
+        return displayID != nil
     }
 
     /// Create a virtual display with specified configuration
@@ -36,6 +37,24 @@ class VirtualDisplayManager {
         // Physical pixels = 2x logical when HiDPI, 1x otherwise
         let physW = hiDPI ? width * 2 : width
         let physH = hiDPI ? height * 2 : height
+        let productID = UInt32((physW * 10000 + physH) & 0xFFFFFFFF)
+
+        // CGVirtualDisplay can remain registered with WindowServer across a
+        // host restart. Reuse the exact Telemachus display instead of trying to
+        // create a duplicate, which the private API rejects.
+        if let existingID = Self.findExistingDisplay(
+            productID: productID,
+            width: physW,
+            height: physH,
+            refreshRate: refreshRate
+        ) {
+            adoptedDisplayID = existingID
+            debugLog(
+                "Reusing existing Telemachus virtual display \(existingID): " +
+                "\(physW)x\(physH) @ \(refreshRate)Hz"
+            )
+            return
+        }
 
         // Create display descriptor
         let descriptor = CGVirtualDisplayDescriptor()
@@ -53,7 +72,7 @@ class VirtualDisplayManager {
 
         // Set vendor/product IDs
         // Use width * 10000 + height so (3840,2400) ≠ (2400,3840) — avoids portrait/landscape collision
-        descriptor.productID = UInt32((physW * 10000 + physH) & 0xFFFFFFFF)
+        descriptor.productID = productID
         descriptor.vendorID = 0xEEEE
         descriptor.serialNum = 0x0001
 
@@ -101,6 +120,31 @@ class VirtualDisplayManager {
         print("✅ Virtual display created: \(modeDesc) @ \(refreshRate)Hz (ID: \(display.displayID))")
     }
 
+    private static func findExistingDisplay(
+        productID: UInt32,
+        width: Int,
+        height: Int,
+        refreshRate: Int
+    ) -> CGDirectDisplayID? {
+        var onlineDisplays = [CGDirectDisplayID](repeating: 0, count: 16)
+        var displayCount: UInt32 = 0
+        guard CGGetOnlineDisplayList(16, &onlineDisplays, &displayCount) == .success else {
+            return nil
+        }
+
+        return onlineDisplays.prefix(Int(displayCount)).first { displayID in
+            guard CGDisplayVendorNumber(displayID) == 0xEEEE,
+                  CGDisplayModelNumber(displayID) == productID,
+                  CGDisplaySerialNumber(displayID) == 1,
+                  Int(CGDisplayPixelsWide(displayID)) == width,
+                  Int(CGDisplayPixelsHigh(displayID)) == height,
+                  let mode = CGDisplayCopyDisplayMode(displayID) else {
+                return false
+            }
+            return abs(mode.refreshRate - Double(refreshRate)) < 0.5
+        }
+    }
+
     /// Clone the main display configuration
     func cloneMainDisplay() throws {
         guard let mainDisplay = CGMainDisplayID() as CGDirectDisplayID? else {
@@ -126,7 +170,7 @@ class VirtualDisplayManager {
 
     /// Enable mirror mode with main display
     func enableMirrorMode() throws {
-        guard let display = virtualDisplay else {
+        guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
         }
 
@@ -141,7 +185,7 @@ class VirtualDisplayManager {
 
         let mirrorResult = CGConfigureDisplayMirrorOfDisplay(
             config,
-            display.displayID,
+            displayID,
             mainDisplay
         )
 
@@ -150,7 +194,7 @@ class VirtualDisplayManager {
             throw VirtualDisplayError.mirrorModeFailed("Failed to configure mirror mode: \(mirrorResult)")
         }
 
-        let completeResult = CGCompleteDisplayConfiguration(config, .permanently)
+        let completeResult = CGCompleteDisplayConfiguration(config, .forSession)
 
         if completeResult != CGError.success {
             throw VirtualDisplayError.mirrorModeFailed("Failed to complete mirror configuration: \(completeResult)")
@@ -161,7 +205,7 @@ class VirtualDisplayManager {
 
     /// Disable mirror mode (extend mode)
     func disableMirrorMode() throws {
-        guard let display = virtualDisplay else {
+        guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
         }
 
@@ -175,7 +219,7 @@ class VirtualDisplayManager {
         // Setting mirror to kCGNullDirectDisplay disables mirroring
         let mirrorResult = CGConfigureDisplayMirrorOfDisplay(
             config,
-            display.displayID,
+            displayID,
             CGDirectDisplayID(kCGNullDirectDisplay)
         )
 
@@ -184,7 +228,7 @@ class VirtualDisplayManager {
             throw VirtualDisplayError.mirrorModeFailed("Failed to disable mirror mode: \(mirrorResult)")
         }
 
-        let completeResult = CGCompleteDisplayConfiguration(config, .permanently)
+        let completeResult = CGCompleteDisplayConfiguration(config, .forSession)
 
         if completeResult != CGError.success {
             throw VirtualDisplayError.mirrorModeFailed("Failed to complete configuration: \(completeResult)")
@@ -202,7 +246,7 @@ class VirtualDisplayManager {
 
     /// Set display position in arrangement
     func setDisplayPosition(x: Int32, y: Int32) throws {
-        guard let display = virtualDisplay else {
+        guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
         }
 
@@ -213,14 +257,14 @@ class VirtualDisplayManager {
             throw VirtualDisplayError.configurationFailed("Failed to begin display configuration")
         }
 
-        let originResult = CGConfigureDisplayOrigin(config, display.displayID, x, y)
+        let originResult = CGConfigureDisplayOrigin(config, displayID, x, y)
 
         if originResult != CGError.success {
             CGCancelDisplayConfiguration(config)
             throw VirtualDisplayError.configurationFailed("Failed to set display origin: \(originResult)")
         }
 
-        let completeResult = CGCompleteDisplayConfiguration(config, .permanently)
+        let completeResult = CGCompleteDisplayConfiguration(config, .forSession)
 
         if completeResult != CGError.success {
             throw VirtualDisplayError.configurationFailed("Failed to complete configuration: \(completeResult)")
@@ -233,22 +277,22 @@ class VirtualDisplayManager {
     func saveDisplayPosition() {
         guard let position = getDisplayPosition() else { return }
         let defaults = UserDefaults.standard
-        defaults.set(Int(position.x), forKey: "SideScreen_positionX")
-        defaults.set(Int(position.y), forKey: "SideScreen_positionY")
-        defaults.set(true, forKey: "SideScreen_hasPosition")
+        defaults.set(Int(position.x), forKey: "Telemachus_positionX")
+        defaults.set(Int(position.y), forKey: "Telemachus_positionY")
+        defaults.set(true, forKey: "Telemachus_hasPosition")
         print("💾 Saved display position: (\(Int(position.x)), \(Int(position.y)))")
     }
 
     /// Restore saved display position
     func restoreDisplayPosition() {
         let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: "SideScreen_hasPosition") else {
+        guard defaults.bool(forKey: "Telemachus_hasPosition") else {
             print("📍 No saved display position found")
             return
         }
 
-        let x = defaults.integer(forKey: "SideScreen_positionX")
-        let y = defaults.integer(forKey: "SideScreen_positionY")
+        let x = defaults.integer(forKey: "Telemachus_positionX")
+        let y = defaults.integer(forKey: "Telemachus_positionY")
 
         do {
             try setDisplayPosition(x: Int32(x), y: Int32(y))
@@ -288,6 +332,7 @@ class VirtualDisplayManager {
             displaySettings = nil
             print("🗑️  Virtual display destroyed")
         }
+        adoptedDisplayID = nil
     }
 
     deinit {

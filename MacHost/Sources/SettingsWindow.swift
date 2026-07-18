@@ -1,6 +1,19 @@
 import Cocoa
 import SwiftUI
 
+enum DisplaySourceMode: String, CaseIterable, Identifiable {
+    case extended
+    case currentMain
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .extended: return "New extended display"
+        case .currentMain: return "Current Mac display"
+        }
+    }
+}
+
 // MARK: - Frosted GroupBox Component
 
 struct FrostedGroupBox<Content: View, Trailing: View>: View {
@@ -97,30 +110,27 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 // Header with frosted glass
                 HStack(spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(LinearGradient(
-                                colors: [Color.accentColor, Color.accentColor.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 48, height: 48)
-                            .shadow(color: Color.accentColor.opacity(0.3), radius: 8, y: 4)
-
-                        Image(systemName: "rectangle.on.rectangle")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundColor(.white)
-                    }
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: Color.accentColor.opacity(0.22), radius: 8, y: 4)
                     .scaleEffect(headerHovered ? 1.05 : 1)
                     .animation(.spring(response: 0.3), value: headerHovered)
                     .onHover { headerHovered = $0 }
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Side Screen")
+                        Text("Telemachus")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                         Text("Turn your tablet into a second display")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
+                        Link(
+                            "Forked from SideScreen",
+                            destination: URL(string: "https://github.com/tranvuongquocdat/SideScreen")!
+                        )
+                        .font(.system(size: 10, weight: .medium))
                     }
 
                     Spacer()
@@ -140,7 +150,7 @@ struct SettingsView: View {
                         Button("Cancel", role: .cancel) { }
                         Button("Reset", role: .destructive) {
                             settings.resetToDefaults()
-                            if let window = NSApp.windows.first(where: { $0.title == "Side Screen" }) {
+                            if let window = NSApp.windows.first(where: { $0.title == "Telemachus" }) {
                                 window.center()
                             }
                         }
@@ -189,6 +199,26 @@ struct SettingsView: View {
                         // Display Configuration
                         FrostedGroupBox(title: "Display Configuration", icon: "display") {
                             VStack(alignment: .leading, spacing: 16) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Source")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Picker("Source", selection: $settings.displaySource) {
+                                        ForEach(DisplaySourceMode.allCases) { source in
+                                            Text(source.title).tag(source)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .pickerStyle(.segmented)
+                                    .disabled(settings.isRunning)
+
+                                    Text(settings.displaySource == .extended
+                                         ? "Creates a real additional desktop that appears in Displays."
+                                         : "Streams the current main display, including macOS Screen Sharing Virtual Display. Resolution below controls stream size only.")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary.opacity(0.75))
+                                }
+
                                 // Resolution
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
@@ -405,7 +435,7 @@ struct SettingsView: View {
                                 }
 
                                 if settings.refreshRate >= 90 {
-                                    Text("High refresh rate for smooth experience")
+                                    Text("Use only with a tablet panel that supports this rate. The connected SM-P610 is 60 Hz.")
                                         .font(.system(size: 10))
                                         .foregroundColor(.green)
                                 }
@@ -480,7 +510,7 @@ struct SettingsView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("Launch at Login")
                                                 .font(.system(size: 12, weight: .medium))
-                                            Text("Run SideScreen in the background automatically after you log in.")
+                                            Text("Run Telemachus in the background automatically after you log in.")
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.secondary)
                                         }
@@ -568,14 +598,14 @@ struct SettingsView: View {
                                             Image(systemName: "checkmark.circle.fill")
                                                 .foregroundColor(.green)
                                                 .font(.system(size: 10))
-                                            Text("High bitrate (1000 Mbps)")
+                                            Text("USB 2-safe bitrate (45 Mbps)")
                                                 .font(.system(size: 11))
                                         }
                                         HStack(spacing: 4) {
                                             Image(systemName: "checkmark.circle.fill")
                                                 .foregroundColor(.green)
                                                 .font(.system(size: 10))
-                                            Text("120 Hz refresh rate")
+                                            Text("No frame reordering and one-frame encode backpressure")
                                                 .font(.system(size: 11))
                                         }
                                         HStack(spacing: 4) {
@@ -608,20 +638,20 @@ struct SettingsView: View {
                                     }
 
                                     HStack(spacing: 6) {
-                                        BitrateButton(label: "100", value: 100, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
-                                            settings.bitrate = 100
+                                        BitrateButton(label: "20", value: 20, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
+                                            settings.bitrate = 20
                                         }
-                                        BitrateButton(label: "300", value: 300, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
-                                            settings.bitrate = 300
+                                        BitrateButton(label: "35", value: 35, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
+                                            settings.bitrate = 35
                                         }
-                                        BitrateButton(label: "500", value: 500, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
-                                            settings.bitrate = 500
+                                        BitrateButton(label: "50", value: 50, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
+                                            settings.bitrate = 50
                                         }
-                                        BitrateButton(label: "1000", value: 1000, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
-                                            settings.bitrate = 1000
+                                        BitrateButton(label: "80", value: 80, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
+                                            settings.bitrate = 80
                                         }
-                                        BitrateButton(label: "2000", value: 2000, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
-                                            settings.bitrate = 2000
+                                        BitrateButton(label: "120", value: 120, currentValue: settings.bitrate, disabled: settings.gamingBoost) {
+                                            settings.bitrate = 120
                                         }
                                     }
 
@@ -632,9 +662,9 @@ struct SettingsView: View {
                                         Slider(value: Binding(
                                             get: { Double(settings.bitrate) },
                                             set: { settings.bitrate = Int($0) }
-                                        ), in: 20...5000, step: 10)
+                                        ), in: 10...200, step: 5)
                                         .disabled(settings.gamingBoost)
-                                        Text("5000")
+                                        Text("200")
                                             .font(.system(size: 9))
                                             .foregroundColor(.secondary)
                                     }
@@ -643,7 +673,7 @@ struct SettingsView: View {
                                         HStack(spacing: 4) {
                                             Image(systemName: "bolt.fill")
                                                 .font(.system(size: 10))
-                                            Text("Locked at 1000 Mbps in Gaming Boost")
+                                            Text("Locked at 45 Mbps in Gaming Boost")
                                                 .font(.system(size: 10))
                                         }
                                         .foregroundColor(.orange)
@@ -681,10 +711,12 @@ struct SettingsView: View {
                         // Status
                         FrostedGroupBox(title: "Status", icon: "checkmark.circle") {
                             VStack(alignment: .leading, spacing: 12) {
-                                StatusRow(title: "Virtual Display",
+                                StatusRow(title: "Display Source",
                                           status: settings.displayCreated ? "Active" : "Inactive",
                                           color: settings.displayCreated ? .green : .secondary,
-                                          hint: "The macOS virtual display we render into. Created when you click Start; the tablet streams its pixels.")
+                                          hint: settings.displaySource == .extended
+                                            ? "A Telemachus virtual display is created as an extended desktop."
+                                            : "The current main macOS display is captured without creating another display.")
                                 StatusRow(title: "Client Connected",
                                           status: settings.clientConnected ? "Yes" : "No",
                                           color: settings.clientConnected ? .green : .secondary,
@@ -730,6 +762,18 @@ struct SettingsView: View {
                                               status: settings.usbDeviceConnected ? "Detected" : "Not detected",
                                               color: settings.usbDeviceConnected ? .green : .red,
                                               hint: "An Android device authorized for ADB and visible to your Mac. Plug in via USB-C and tap Allow on the device's USB debugging prompt.")
+                                    if settings.availableADBDevices.count > 1 {
+                                        Picker(
+                                            "Target tablet",
+                                            selection: $settings.adbDeviceSerial
+                                        ) {
+                                            ForEach(settings.availableADBDevices, id: \.self) {
+                                                Text($0).tag($0)
+                                            }
+                                        }
+                                        .font(.system(size: 11))
+                                        .help("ADB serial used for reverse forwarding and automatic launch.")
+                                    }
                                 } else {
                                     StatusRow(title: "WiFi",
                                               status: settings.wifiConnected ? "Connected" : "Disconnected",
@@ -913,7 +957,7 @@ struct SettingsView: View {
                                 }
                         }
                         .buttonStyle(.plain)
-                        .help("Quit Side Screen (⌘Q)")
+                        .help("Quit Telemachus (⌘Q)")
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
@@ -1106,7 +1150,7 @@ struct RotationButton: View {
 
 class DisplaySettings: ObservableObject {
     private let defaults = UserDefaults.standard
-    private let keyPrefix = "SideScreen_"
+    private let keyPrefix = "Telemachus_"
 
     @Published var resolution: String {
         didSet { save("resolution", resolution) }
@@ -1153,6 +1197,15 @@ class DisplaySettings: ObservableObject {
     @Published var startupMode: ConnectionMode {
         didSet { save("startupMode", startupMode.rawValue) }
     }
+    @Published var displaySource: DisplaySourceMode {
+        didSet { save("displaySource", displaySource.rawValue) }
+    }
+    @Published var hasCompletedOnboarding: Bool {
+        didSet { save("hasCompletedOnboarding", hasCompletedOnboarding) }
+    }
+    @Published var adbDeviceSerial: String {
+        didSet { save("adbDeviceSerial", adbDeviceSerial) }
+    }
 
     // Runtime state (not persisted)
     @Published var displayCreated = false
@@ -1165,20 +1218,25 @@ class DisplaySettings: ObservableObject {
     @Published var adbInstalled = false
     @Published var adbReverseConfigured = false
     @Published var usbDeviceConnected = false
+    @Published var availableADBDevices: [String] = []
     @Published var wifiConnected = false
     @Published var listeningAddress: String?
     @Published var isRunning = false
     @Published var currentFPS: Double = 0
     @Published var currentBitrate: Double = 0
     @Published var captureMethod: String = "Initializing..."
+    @Published var wirelessTokenError: String?
 
     var onToggleServer: (() -> Void)?
+    var onRequestScreenRecordingPermission: (() -> Void)?
+    var onRequestAccessibilityPermission: (() -> Void)?
+    var onResetWirelessToken: (() -> Bool)?
 
     init() {
-        self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "1920x1200"
+        self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "2000x1200"
         self.refreshRate = defaults.object(forKey: keyPrefix + "refreshRate") as? Int ?? 60  // Default: 60 — balanced for most tablets. 120 may saturate high-res panel pipelines.
         self.hiDPI = defaults.bool(forKey: keyPrefix + "hiDPI")
-        self.bitrate = defaults.object(forKey: keyPrefix + "bitrate") as? Int ?? 1000  // Default: 1000 Mbps
+        self.bitrate = defaults.object(forKey: keyPrefix + "bitrate") as? Int ?? 35
         self.quality = defaults.string(forKey: keyPrefix + "quality") ?? "ultralow"  // Default: fastest encoding
         self.gamingBoost = defaults.bool(forKey: keyPrefix + "gamingBoost")
         // Default port 54321 (was 8888 in <=0.7.1; 8888 collides with jupyter/splunk/HP printers).
@@ -1191,9 +1249,15 @@ class DisplaySettings: ObservableObject {
         self.touchEnabled = defaults.object(forKey: keyPrefix + "touchEnabled") as? Bool ?? true
         let modeRaw = defaults.string(forKey: keyPrefix + "connectionMode") ?? ConnectionMode.usb.rawValue
         self.connectionMode = ConnectionMode(rawValue: modeRaw) ?? .usb
-        self.autoStartStreamingOnLaunch = defaults.object(forKey: keyPrefix + "autoStartStreamingOnLaunch") as? Bool ?? false
+        self.autoStartStreamingOnLaunch = defaults.object(forKey: keyPrefix + "autoStartStreamingOnLaunch") as? Bool ?? true
         let startupRaw = defaults.string(forKey: keyPrefix + "startupMode") ?? modeRaw
         self.startupMode = ConnectionMode(rawValue: startupRaw) ?? .usb
+        let sourceRaw = defaults.string(forKey: keyPrefix + "displaySource") ?? DisplaySourceMode.currentMain.rawValue
+        self.displaySource = DisplaySourceMode(rawValue: sourceRaw) ?? .currentMain
+        self.hasCompletedOnboarding = defaults.bool(forKey: keyPrefix + "hasCompletedOnboarding")
+        self.adbDeviceSerial = defaults.string(
+            forKey: keyPrefix + "adbDeviceSerial"
+        ) ?? ""
 
         print("Loaded settings: \(resolution) @ \(refreshRate)Hz, bitrate=\(bitrate), quality=\(quality)")
     }
@@ -1239,7 +1303,7 @@ class DisplaySettings: ObservableObject {
     }
 
     var effectiveBitrate: Int {
-        return gamingBoost ? 1000 : bitrate
+        return gamingBoost ? 45 : bitrate
     }
 
     var effectiveQuality: String {
@@ -1247,25 +1311,38 @@ class DisplaySettings: ObservableObject {
     }
 
     var effectiveRefreshRate: Int {
-        return gamingBoost ? 120 : refreshRate
+        return refreshRate
     }
 
     func toggleServer() {
         onToggleServer?()
     }
 
+    func requestScreenRecordingPermission() {
+        onRequestScreenRecordingPermission?()
+    }
+
+    func requestAccessibilityPermission() {
+        onRequestAccessibilityPermission?()
+    }
+
+    func resetWirelessToken() -> Bool {
+        onResetWirelessToken?() ?? false
+    }
+
     func resetToDefaults() {
         let keys = ["resolution", "refreshRate", "hiDPI", "bitrate", "quality",
                     "gamingBoost", "port", "rotation", "showAllResolutions",
-                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode"]
+                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode",
+                    "displaySource", "adbDeviceSerial"]
         for key in keys {
             defaults.removeObject(forKey: keyPrefix + key)
         }
 
-        resolution = "1920x1200"
-        refreshRate = 120  // Default: highest FPS
+        resolution = "2000x1200"
+        refreshRate = 60
         hiDPI = false
-        bitrate = 1000  // Default: 1000 Mbps
+        bitrate = 35
         quality = "ultralow"  // Default: fastest encoding
         gamingBoost = false
         port = 54321
@@ -1274,8 +1351,10 @@ class DisplaySettings: ObservableObject {
         customWidth = 1920
         customHeight = 1200
         touchEnabled = true
-        autoStartStreamingOnLaunch = false
+        autoStartStreamingOnLaunch = true
         startupMode = .usb
+        displaySource = .currentMain
+        adbDeviceSerial = ""
 
         print("Settings reset to defaults")
     }
@@ -1312,12 +1391,12 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
 
-        window.title = "Side Screen"
+        window.title = "Telemachus"
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .windowBackgroundColor
         window.isMovableByWindowBackground = true
         window.center()
-        window.contentView = NSHostingView(rootView: SettingsView(settings: settings))
+        window.contentView = NSHostingView(rootView: TelemachusRootView(settings: settings))
         window.isReleasedWhenClosed = false
 
         self.init(window: window)
@@ -1393,6 +1472,18 @@ struct WirelessSection: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lock.trianglebadge.exclamationmark")
+                    .foregroundColor(.orange)
+                Text("Wireless is experimental and intended only for a trusted private LAN. Video, input, and the pairing token are not encrypted; the saved token is protected by macOS Keychain.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(6)
+
             if !settings.isRunning {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -1418,9 +1509,18 @@ struct WirelessSection: View {
                             .background(Color.white)
                             .cornerRadius(8)
                     } else {
-                        Text("Generating QR…").foregroundColor(.secondary)
+                        Text(
+                            settings.wirelessTokenError.map {
+                                "Could not access the pairing token: \($0)"
+                            } ?? "Connect this Mac to the tablet's trusted LAN to generate a QR code."
+                        )
+                            .font(.system(size: 11))
+                            .foregroundColor(
+                                settings.wirelessTokenError == nil ? .secondary : .red
+                            )
+                            .multilineTextAlignment(.center)
                     }
-                    Text("Scan this QR from Side Screen Android (Wireless tab)")
+                    Text("Scan this QR from Telemachus Android (Wireless tab)")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -1457,12 +1557,13 @@ struct WirelessSection: View {
                                     }
                                 }
                                 Spacer()
-                                Button("Forget") {
+                                Button("Remove History") {
                                     pairedDeviceStore.forget(name: device.name)
                                     refreshPaired()
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .help("Removes this name from local history. Reset the token below to revoke access.")
                             }
                             .padding(6)
                             .background(.ultraThinMaterial)
@@ -1506,8 +1607,9 @@ struct WirelessSection: View {
         .alert("Reset Token?", isPresented: $showResetConfirm) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {
-                _ = WirelessAuth.reset()
-                pairedDeviceStore.clear()
+                if settings.resetWirelessToken() {
+                    pairedDeviceStore.clear()
+                }
                 refreshQR()
                 refreshPaired()
             }
@@ -1517,8 +1619,19 @@ struct WirelessSection: View {
     }
 
     private func refreshQR() {
-        let token = WirelessAuth.loadOrCreate()
-        let host = LANAddressResolver.primaryIPv4() ?? "0.0.0.0"
+        let token: Data
+        do {
+            token = try WirelessAuth.loadOrCreate()
+            settings.wirelessTokenError = nil
+        } catch {
+            settings.wirelessTokenError = error.localizedDescription
+            qrImage = nil
+            return
+        }
+        guard let host = LANAddressResolver.primaryIPv4() else {
+            qrImage = nil
+            return
+        }
         let name = Host.current().localizedName ?? "Mac"
         let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
         qrImage = QRRenderer.render(url: url, size: 180)

@@ -3,21 +3,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+. "$SCRIPT_DIR/android-env.sh"
 
 echo "🔨 Building Android Client..."
 cd "$ROOT_DIR/AndroidClient"
+android_configure_build_env
 
-# Set JAVA_HOME for Android Studio's bundled JDK
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-
-# Check if Java is available
-if [ ! -d "$JAVA_HOME" ]; then
-    echo "❌ Java not found at: $JAVA_HOME"
-    echo "   Please install Android Studio or set JAVA_HOME manually"
-    exit 1
-fi
-
-./gradlew assembleDebug
+./gradlew assembleDebug testDebugUnitTest
 
 echo ""
 echo "✅ Build successful!"

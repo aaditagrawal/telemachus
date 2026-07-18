@@ -30,7 +30,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.sidescreen.capturetest</string>
+    <string>com.telemachus.capturetest</string>
     <key>CFBundleName</key>
     <string>CaptureTest</string>
     <key>CFBundleExecutable</key>

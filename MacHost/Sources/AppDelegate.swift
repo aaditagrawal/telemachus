@@ -5,21 +5,57 @@ import ApplicationServices
 import os.log
 @preconcurrency import ScreenCaptureKit
 
-// Debug file logger - writes to /tmp/sidescreen.log
-func debugLog(_ message: String) {
-    let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-    let line = "[\(timestamp)] \(message)\n"
-    print(message)
-    if let data = line.data(using: .utf8) {
-        let url = URL(fileURLWithPath: "/tmp/sidescreen.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
-        } else {
-            try? data.write(to: url)
+private enum TelemachusLog {
+    static let unified = Logger(
+        subsystem: "dev.telemachus.display",
+        category: "runtime"
+    )
+    static let lock = NSLock()
+    static let maximumFileSize: UInt64 = 1_048_576
+
+    static func write(_ message: String) {
+        // Dynamic details such as device names and addresses remain private in
+        // the unified log. The local file is mode 0600 and rotates at 1 MiB.
+        unified.debug("\(message, privacy: .private)")
+        lock.withLock {
+            do {
+                let directory = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/Telemachus", isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                let url = directory.appendingPathComponent("telemachus.log")
+                let rotatedURL = directory.appendingPathComponent("telemachus.log.1")
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size >= maximumFileSize {
+                    try? FileManager.default.removeItem(at: rotatedURL)
+                    try? FileManager.default.moveItem(at: url, to: rotatedURL)
+                }
+                let timestamp = ISO8601DateFormatter().string(from: Date())
+                let data = Data("\(timestamp) \(message)\n".utf8)
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    FileManager.default.createFile(
+                        atPath: url.path,
+                        contents: data,
+                        attributes: [.posixPermissions: 0o600]
+                    )
+                } else {
+                    let handle = try FileHandle(forWritingTo: url)
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                    try handle.close()
+                }
+            } catch {
+                unified.error("File logging failed: \(error.localizedDescription, privacy: .private)")
+            }
         }
     }
+}
+
+func debugLog(_ message: String) {
+    TelemachusLog.write(message)
 }
 
 // MARK: - Gesture State Machine
@@ -49,6 +85,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var streamingServer: StreamingServer?
     var screenCapture: ScreenCapture?
     var virtualDisplayManager: VirtualDisplayManager?
+    /// The display currently being captured. This may be a Telemachus-created
+    /// extension or an existing macOS display such as Screen Sharing Virtual Display.
+    private var activeDisplayID: CGDirectDisplayID?
     var settings = DisplaySettings()
     var settingsWindow: SettingsWindowController?
     var statusItem: NSStatusItem?
@@ -60,10 +99,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var permissionCheckTimer: Timer?
     private var statusRefreshTimer: Timer?
+    private var permissionMonitoringReady = false
     var isDaemonMode = false // Deprecated: keeping variable for ABI compatibility but unused
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("✅ App launched")
+
+        // Seed permission state synchronously so the first visible window never
+        // flashes the onboarding flow for an already-authorized installation.
+        settings.hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
+        settings.hasAccessibilityPermission = AXIsProcessTrusted()
 
         // Create menu bar item
         setupMenuBar()
@@ -77,6 +122,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Check permissions
         Task {
             await checkPermissions()
+            await MainActor.run {
+                permissionMonitoringReady = true
+            }
+        }
+
+        // Notice grants made while System Settings is open. This keeps first-run
+        // setup plug-and-play: once Screen Recording is enabled, an auto-start
+        // configuration can begin streaming without another click in Telemachus.
+        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshPermissionState()
+            }
         }
 
         // Periodic status refresh for the per-mode checklist (ADB / WiFi / Listening IP).
@@ -90,8 +147,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             refreshStatusIndicators()
         }
 
-        if #available(macOS 13.0, *) {
-            if DaemonManager.shared.isEnabled {
+        if CommandLine.arguments.contains("--headless-benchmark") {
+            debugLog("Headless benchmark mode: settings window suppressed")
+        } else if #available(macOS 13.0, *) {
+            if DaemonManager.shared.isEnabled && settings.hasCompletedOnboarding {
                 print("🚀 Launch at Login is enabled - starting silently in background")
                 // Do not show settings window automatically.
                 // applicationShouldHandleReopen will show it if the user manually launched the app.
@@ -125,6 +184,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in
+            refreshPermissionState()
+        }
+    }
+
+    @MainActor
+    private func refreshPermissionState() {
+        guard permissionMonitoringReady else { return }
+
+        let hadScreenRecording = settings.hasScreenRecordingPermission
+        let hasScreenRecording = CGPreflightScreenCaptureAccess()
+        settings.hasScreenRecordingPermission = hasScreenRecording
+        settings.hasAccessibilityPermission = AXIsProcessTrusted()
+
+        guard hasScreenRecording, !hadScreenRecording else { return }
+        debugLog("Screen Recording permission became available while app was running")
+
+        if settings.autoStartStreamingOnLaunch && !settings.isRunning {
+            Task {
+                await startServer()
+            }
+        }
+    }
+
     @MainActor
     private func refreshStatusIndicators() {
         settings.adbInstalled = StatusDetector.adbInstalled()
@@ -141,15 +225,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let port = Int(settings.port)
+        let selectedSerial = settings.adbDeviceSerial
         Task.detached { [weak self] in
             let devices = StatusDetector.usbDevices()
-            let reverseOK = StatusDetector.adbReverseConfigured(port: port)
+            let effectiveSerial: String?
+            if devices.contains(selectedSerial) {
+                effectiveSerial = selectedSerial
+            } else {
+                effectiveSerial = devices.first
+            }
+            let reverseOK = StatusDetector.adbReverseConfigured(
+                port: port,
+                serial: effectiveSerial
+            )
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 
                 let isConnected = !devices.isEmpty
 
                 self.settings.usbDeviceConnected = isConnected
+                self.settings.availableADBDevices = devices
+                if let effectiveSerial,
+                   self.settings.adbDeviceSerial != effectiveSerial {
+                    self.settings.adbDeviceSerial = effectiveSerial
+                }
                 self.settings.adbReverseConfigured = reverseOK
 
                 // Self-healing USB bridge (level-triggered, not edge-triggered):
@@ -179,7 +278,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if mode == .wireless {
             // Generate token if missing; the QR will reflect it.
-            _ = WirelessAuth.loadOrCreate()
+            do {
+                _ = try WirelessAuth.loadOrCreate()
+                settings.wirelessTokenError = nil
+            } catch {
+                settings.wirelessTokenError = error.localizedDescription
+                debugLog("Could not prepare wireless token: \(error.localizedDescription)")
+            }
         }
         if wasRunning {
             await startServer()
@@ -269,6 +374,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        settings.$displaySource
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] source in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard self.settings.isRunning else { return }
+                    debugLog("Display source changed to \(source.rawValue) — restarting capture")
+                    self.stopServer()
+                    await self.startServer()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func setupMenuBar() {
@@ -298,6 +417,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { [weak self] in
                     await self?.startServer()
                 }
+            }
+        }
+
+        settings.onRequestScreenRecordingPermission = { [weak self] in
+            guard let appDelegate = self else { return }
+            Task { @MainActor in
+                appDelegate.requestScreenRecordingPermission()
+            }
+        }
+
+        settings.onRequestAccessibilityPermission = { [weak self] in
+            guard let appDelegate = self else { return }
+            Task { @MainActor in
+                appDelegate.requestAccessibilityPermission()
+            }
+        }
+
+        settings.onResetWirelessToken = { [weak self] in
+            do {
+                let token = try WirelessAuth.reset()
+                self?.settings.wirelessTokenError = nil
+                self?.streamingServer?.rotateAuthToken(token)
+                return true
+            } catch {
+                self?.settings.wirelessTokenError = error.localizedDescription
+                debugLog("Could not reset wireless token: \(error.localizedDescription)")
+                return false
             }
         }
     }
@@ -331,7 +477,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             debugLog("Screen recording permission not granted yet")
-            CGRequestScreenCaptureAccess()
         }
 
         // Check Accessibility permission (required for touch/mouse injection)
@@ -351,20 +496,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    func promptAccessibilityPermission() {
-        // This will show the system prompt to grant Accessibility permission
+    func requestScreenRecordingPermission() {
+        let granted = CGRequestScreenCaptureAccess()
+        settings.hasScreenRecordingPermission = granted || CGPreflightScreenCaptureAccess()
+
+        if !settings.hasScreenRecordingPermission,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @MainActor
+    func requestAccessibilityPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(options)
         settings.hasAccessibilityPermission = trusted
 
         if !trusted {
             print("⚠️  User needs to grant Accessibility permission in System Settings")
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 
     /// Setup ADB reverse port forwarding for USB connection
     func setupADBReverse() async {
         let port = settings.port
+        let configuredSerial = settings.adbDeviceSerial
         print("🔌 Setting up ADB reverse for port \(port)...")
         debugLog("🔌 setupADBReverse() invoked for port \(port)...")
 
@@ -415,12 +574,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             print("📱 Found ADB at: \(finalAdbPath)")
+            let connectedSerials = StatusDetector.usbDevices()
+            let targetSerial = connectedSerials.contains(configuredSerial)
+                ? configuredSerial
+                : connectedSerials.first
 
             // Retry adb reverse up to 3 times — handles first-install authorization delay
             for attempt in 1...3 {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: finalAdbPath)
-                process.arguments = ["reverse", "tcp:\(port)", "tcp:\(port)"]
+                process.arguments = StatusDetector.adbArguments(
+                    serial: targetSerial,
+                    command: ["reverse", "tcp:\(port)", "tcp:\(port)"]
+                )
 
                 let pipe = Pipe()
                 process.standardOutput = pipe
@@ -435,6 +601,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                     if process.terminationStatus == 0 {
                         print("✅ ADB reverse setup successful: tcp:\(port) -> tcp:\(port)")
+                        Self.launchAndroidClient(
+                            adbPath: finalAdbPath,
+                            serial: targetSerial
+                        )
                         return
                     } else {
                         print("⚠️  ADB reverse attempt \(attempt)/3 failed: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
@@ -452,6 +622,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             print("💡 Make sure Android device is connected via USB with debugging enabled")
         }.value
+    }
+
+    /// Bring the Android receiver to the foreground and ask it to connect.
+    /// `am start` is idempotent because MainActivity uses singleTop and handles
+    /// repeated intents, which gives us cable-driven plug-and-play after setup.
+    private static func launchAndroidClient(adbPath: String, serial: String?) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: adbPath)
+        process.arguments = StatusDetector.adbArguments(serial: serial, command: [
+            "shell", "am", "start",
+            "-a", "android.intent.action.MAIN",
+            "-n", "dev.telemachus.display/.MainActivity",
+            "--ez", "auto_connect", "true"
+        ])
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let output = String(
+                data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if process.terminationStatus == 0 {
+                debugLog("📱 Android client launched for automatic USB connection")
+            } else {
+                debugLog("Android auto-launch unavailable: \(output)")
+            }
+        } catch {
+            debugLog("Android auto-launch failed: \(error.localizedDescription)")
+        }
     }
 
     @MainActor
@@ -486,23 +689,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         do {
-            // Create virtual display and run ADB setup in parallel
-            virtualDisplayManager = VirtualDisplayManager()
             let size = settings.resolutionSize
-            try virtualDisplayManager?.createDisplay(
-                width: size.width,
-                height: size.height,
-                refreshRate: settings.refreshRate,
-                hiDPI: settings.hiDPI,
-                name: "SideScreen"
-            )
+            let captureDisplayID: CGDirectDisplayID
+            let streamSize: (width: Int, height: Int)
 
-            // Disable mirror mode (may fail if already in extend mode)
-            do {
-                try virtualDisplayManager?.disableMirrorMode()
-            } catch {
-                // Not critical - continue anyway
+            switch settings.displaySource {
+            case .extended:
+                let manager = VirtualDisplayManager()
+                virtualDisplayManager = manager
+                try manager.createDisplay(
+                    width: size.width,
+                    height: size.height,
+                    refreshRate: settings.refreshRate,
+                    hiDPI: settings.hiDPI,
+                    name: "Telemachus"
+                )
+
+                // Disable mirror mode (may fail if already in extend mode).
+                try? manager.disableMirrorMode()
+                guard let createdID = manager.displayID else {
+                    throw VirtualDisplayError.creationFailed("Display was created without a display ID")
+                }
+                captureDisplayID = createdID
+                streamSize = size
+
+            case .currentMain:
+                virtualDisplayManager = nil
+                captureDisplayID = CGMainDisplayID()
+                streamSize = Self.aspectFitStreamSize(
+                    sourceWidth: CGDisplayPixelsWide(captureDisplayID),
+                    sourceHeight: CGDisplayPixelsHigh(captureDisplayID),
+                    maximumWidth: size.width,
+                    maximumHeight: size.height
+                )
+                debugLog(
+                    "Using existing main display \(captureDisplayID): " +
+                    "\(CGDisplayPixelsWide(captureDisplayID))x\(CGDisplayPixelsHigh(captureDisplayID)), " +
+                    "streaming \(streamSize.width)x\(streamSize.height)"
+                )
             }
+            activeDisplayID = captureDisplayID
 
             await MainActor.run {
                 settings.displayCreated = true
@@ -519,10 +745,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 group.addTask { try? await Task.sleep(nanoseconds: 500_000_000) }
             }
 
-            virtualDisplayManager?.restoreDisplayPosition()
-
-            // Verify display is registered in the system
             if let vdm = virtualDisplayManager {
+                vdm.restoreDisplayPosition()
                 let registered = vdm.verifyDisplayRegistered()
                 if !registered {
                     debugLog("WARNING: Virtual display not found in online display list — capture may fail")
@@ -530,7 +754,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // Setup capture
-            guard let displayID = virtualDisplayManager?.displayID else { return }
             screenCapture = try await ScreenCapture()
             screenCapture?.onCaptureMethodChanged = { [weak self] method in
                 guard let self = self else { return }
@@ -539,13 +762,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.settings.captureMethod = method
                 }
             }
-            try await screenCapture?.setupForVirtualDisplay(displayID, refreshRate: settings.effectiveRefreshRate)
+            screenCapture?.onDisplayIDChanged = { [weak self] displayID in
+                guard let appDelegate = self else { return }
+                Task { @MainActor in
+                    appDelegate.activeDisplayID = displayID
+                }
+            }
+            let existingDisplayOutput = settings.displaySource == .currentMain ? streamSize : nil
+            try await screenCapture?.setupForDisplay(
+                captureDisplayID,
+                refreshRate: settings.effectiveRefreshRate,
+                outputSize: existingDisplayOutput,
+                followsMainDisplay: settings.displaySource == .currentMain
+            )
 
-            // Setup server
-            streamingServer = StreamingServer(port: settings.port)
+            // Setup server. USB is loopback-only; wireless authenticates every
+            // candidate before it can replace the active client.
+            let serverMode: StreamingServerMode
+            if settings.connectionMode == .wireless {
+                serverMode = .wireless(
+                    authToken: try WirelessAuth.loadOrCreate()
+                )
+                settings.wirelessTokenError = nil
+            } else {
+                serverMode = .usb
+            }
+            streamingServer = StreamingServer(
+                port: settings.port,
+                mode: serverMode
+            )
             streamingServer?.touchEnabled = settings.touchEnabled
             if settings.connectionMode == .wireless {
-                streamingServer?.expectedAuthToken = WirelessAuth.loadOrCreate()
                 streamingServer?.onWirelessClientPaired = { [weak self] deviceName in
                     guard let self = self else { return }
                     Task { @MainActor in
@@ -561,7 +808,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // logical dimensions here makes the resolution overlay on Android
             // match the Mac's resolution dropdown (e.g. "2560x1600" instead of
             // the HiDPI-doubled "5120x3200").
-            streamingServer?.setDisplaySize(width: size.width, height: size.height, rotation: settings.rotation)
+            streamingServer?.setDisplaySize(width: streamSize.width, height: streamSize.height, rotation: settings.rotation)
             streamingServer?.onClientConnected = { [weak self] in
                 guard let self = self else { return }
                 self.screenCapture?.requestKeyframeOrReplayCachedFrame(force: true)
@@ -577,8 +824,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 capture.setCodec(codec)
                 switch codec {
                 case .hevc:
-                    // Logical user-picked resolution, exactly as at startup.
-                    self.streamingServer?.setDisplaySize(width: size.width, height: size.height, rotation: self.settings.rotation)
+                    self.streamingServer?.setDisplaySize(
+                        width: streamSize.width,
+                        height: streamSize.height,
+                        rotation: self.settings.rotation
+                    )
                 case .h264:
                     // Clamped physical encode size: the client must configure
                     // its (weak) AVC decoder within its supported range, and
@@ -618,8 +868,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            streamingServer?.start()
-            screenCapture?.startStreaming(
+            streamingServer?.onServerFailed = { [weak self] error in
+                debugLog("Streaming listener stopped: \(error.localizedDescription)")
+                self?.performSelector(
+                    onMainThread: #selector(AppDelegate.handleServerFailure),
+                    with: nil,
+                    waitUntilDone: false
+                )
+            }
+
+            try streamingServer?.start()
+            try await screenCapture?.startStreaming(
                 to: streamingServer,
                 bitrateMbps: settings.effectiveBitrate,
                 quality: settings.effectiveQuality,
@@ -635,6 +894,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("❌ Failed to start: \(error)")
             await MainActor.run {
+                teardownStreamingComponents()
                 settings.isRunning = false
                 settings.displayCreated = false
 
@@ -647,13 +907,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Idempotent cleanup used for both normal shutdown and a failure after any
+    /// partial combination of display, capture, listener, or ADB setup.
+    private func teardownStreamingComponents() {
+        screenCapture?.stopStreaming()
+        streamingServer?.stop()
+        virtualDisplayManager?.destroyDisplay()
+        screenCapture = nil
+        streamingServer = nil
+        virtualDisplayManager = nil
+        activeDisplayID = nil
+    }
+
+    @objc private func handleServerFailure() {
+        guard settings.isRunning else { return }
+        stopServer()
+    }
+
+    /// Scale an existing display into the requested stream bounds without
+    /// stretching it. VideoToolbox requires even dimensions for reliable
+    /// hardware H.264/HEVC operation, so both axes are rounded down to even.
+    static func aspectFitStreamSize(
+        sourceWidth: Int,
+        sourceHeight: Int,
+        maximumWidth: Int,
+        maximumHeight: Int
+    ) -> (width: Int, height: Int) {
+        guard sourceWidth > 0, sourceHeight > 0, maximumWidth > 0, maximumHeight > 0 else {
+            return (max(2, maximumWidth & ~1), max(2, maximumHeight & ~1))
+        }
+
+        let scale = min(
+            1.0,
+            Double(maximumWidth) / Double(sourceWidth),
+            Double(maximumHeight) / Double(sourceHeight)
+        )
+        let fittedWidth = max(2, Int(floor(Double(sourceWidth) * scale)) & ~1)
+        let fittedHeight = max(2, Int(floor(Double(sourceHeight) * scale)) & ~1)
+        return (fittedWidth, fittedHeight)
+    }
+
     func stopServer() {
         // Save display position before destroying
         virtualDisplayManager?.saveDisplayPosition()
 
-        screenCapture?.stopStreaming()
-        streamingServer?.stop()
-        virtualDisplayManager?.destroyDisplay()
+        teardownStreamingComponents()
 
         settings.isRunning = false
         settings.displayCreated = false
@@ -712,7 +1010,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard let displayID = virtualDisplayManager?.displayID else { return }
+        guard let displayID = activeDisplayID else { return }
         let bounds = CGDisplayBounds(displayID)
 
         let p1 = CGPoint(
@@ -1059,6 +1357,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Stop momentum scrolling
         stopMomentumScroll()
+
+        permissionCheckTimer?.invalidate()
+        statusRefreshTimer?.invalidate()
 
         // Stop server and cleanup
         stopServer()

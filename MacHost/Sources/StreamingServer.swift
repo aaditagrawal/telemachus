@@ -35,8 +35,28 @@ private extension NWEndpoint {
     }
 }
 
+enum StreamingServerError: LocalizedError {
+    case startupTimedOut
+    case listenerCancelled
+
+    var errorDescription: String? {
+        switch self {
+        case .startupTimedOut:
+            return "Timed out while opening the streaming port."
+        case .listenerCancelled:
+            return "The streaming listener was cancelled before it became ready."
+        }
+    }
+}
+
+enum StreamingServerMode {
+    case usb
+    case wireless(authToken: Data)
+}
+
 class StreamingServer {
     private let port: UInt16
+    private let mode: StreamingServerMode
     private var listener: NWListener?
     private var connection: NWConnection?
     var onClientConnected: (() -> Void)?
@@ -54,15 +74,25 @@ class StreamingServer {
     // immediately without parsing or dispatching to main queue.
     var touchEnabled: Bool = true
 
-    // Wireless auth: when non-nil, non-loopback connections must present this
-    // 32-byte token before being allowed to proceed. nil means wireless mode
-    // is inactive — non-loopback connections are rejected immediately.
-    var expectedAuthToken: Data?
     var onWirelessClientPaired: ((String) -> Void)?
+    var onServerFailed: ((Error) -> Void)?
 
     private let frameQueue = DispatchQueue(label: "frameQueue", qos: .userInteractive)
     private let receiveQueue = DispatchQueue(label: "receiveQueue", qos: .userInteractive)
     private let networkQueue = DispatchQueue(label: "networkQueue", qos: .userInteractive)
+    private struct PendingFrame {
+        let data: Data
+        let timestamp: UInt64
+        let isKeyframe: Bool
+        let connection: NWConnection
+        let generation: UInt64
+    }
+    /// At most one frame is inside Network.framework and one newer frame is
+    /// retained. This prevents a transient USB/Wi-Fi slowdown from becoming a
+    /// seconds-long FIFO of pictures the viewer no longer wants to see.
+    private var sendInFlight = false
+    private var pendingFrame: PendingFrame?
+    private var framePipelineGeneration: UInt64 = 0
     private var bytesSent: UInt64 = 0
     private var frameCount: UInt64 = 0
     private var droppedFrames: UInt64 = 0
@@ -73,114 +103,226 @@ class StreamingServer {
     private var isReceiving = false
     private var isStopped = false
     private var connectionReady = false
+    private var activeConnectionGeneration: UInt64 = 0
+    private var activeConnectionIsWireless = false
     private var waitingForSyncFrame = false
     private var clientSupportsFrameMetadata = false
     private var clientIsAvcOnly = false
     private var inputBuffer = Data()
+    private var expectedAuthToken: Data?
+    private var pendingHandshakeTimeouts: [ObjectIdentifier: DispatchWorkItem] = [:]
+    private var pendingWirelessConnections: [ObjectIdentifier: NWConnection] = [:]
 
-    init(port: UInt16) {
+    init(port: UInt16, mode: StreamingServerMode = .usb) {
         self.port = port
+        self.mode = mode
+        if case .wireless(let authToken) = mode {
+            expectedAuthToken = authToken
+        }
     }
 
-    func start() {
+    /// Starts the listener and returns only after Network.framework reports it
+    /// ready. This prevents callers from presenting a false "Running" state
+    /// when the port is occupied or listener creation fails.
+    func start(timeout: TimeInterval = 3) throws {
         isStopped = false
-        do {
-            let params = NWParameters.tcp
-            params.allowLocalEndpointReuse = true
+        let params = NWParameters.tcp
 
-            // Optimize TCP for low-latency streaming
-            if let tcpOptions = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-                tcpOptions.noDelay = true  // Disable Nagle's algorithm
+        if let tcpOptions = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcpOptions.noDelay = true
+        }
+
+        let newListener: NWListener
+        switch mode {
+        case .usb:
+            // adb reverse reaches the Mac through loopback. Do not expose the
+            // unauthenticated USB listener to the LAN.
+            params.requiredLocalEndpoint = .hostPort(
+                host: NWEndpoint.Host("127.0.0.1"),
+                port: NWEndpoint.Port(rawValue: port)!
+            )
+            newListener = try NWListener(using: params)
+        case .wireless:
+            newListener = try NWListener(
+                using: params,
+                on: NWEndpoint.Port(rawValue: port)!
+            )
+        }
+        listener = newListener
+
+        let startupSignal = DispatchSemaphore(value: 0)
+        let startupLock = NSLock()
+        var startupResult: Result<Void, Error>?
+        var startupFinished = false
+        var listenerWasReady = false
+
+        func completeStartup(_ result: Result<Void, Error>) {
+            startupLock.lock()
+            guard !startupFinished else {
+                startupLock.unlock()
+                return
             }
+            startupFinished = true
+            startupResult = result
+            startupLock.unlock()
+            startupSignal.signal()
+        }
 
-            listener = try NWListener(using: params, on: NWEndpoint.Port(integerLiteral: port))
+        newListener.newConnectionHandler = { [weak self] newConnection in
+            self?.handleConnection(newConnection)
+        }
 
-            listener?.newConnectionHandler = { [weak self] newConnection in
-                self?.handleConnection(newConnection)
-            }
-
-            listener?.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    debugLog("TCP Server listening on port \(self.port)")
-                case .failed(let error):
-                    debugLog("Server failed: \(error)")
-                default:
-                    break
+        newListener.stateUpdateHandler = { [weak self, weak newListener] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                listenerWasReady = true
+                debugLog("TCP server listening on port \(self.port)")
+                completeStartup(.success(()))
+            case .failed(let error):
+                debugLog("Server failed: \(error)")
+                completeStartup(.failure(error))
+                if listenerWasReady, newListener === self.listener {
+                    self.onServerFailed?(error)
                 }
+            case .cancelled:
+                completeStartup(.failure(StreamingServerError.listenerCancelled))
+            default:
+                break
             }
+        }
 
-            listener?.start(queue: networkQueue)
-        } catch {
-            debugLog("Failed to start server: \(error)")
+        newListener.start(queue: networkQueue)
+        guard startupSignal.wait(timeout: .now() + timeout) == .success else {
+            newListener.cancel()
+            listener = nil
+            throw StreamingServerError.startupTimedOut
+        }
+
+        switch startupResult {
+        case .success:
+            return
+        case .failure(let error):
+            listener = nil
+            throw error
+        case .none:
+            listener = nil
+            throw StreamingServerError.startupTimedOut
         }
     }
 
     private func handleConnection(_ newConnection: NWConnection) {
         debugLog("New connection incoming...")
-
-        // Clean up old connection properly
-        if let oldConnection = connection {
-            isReceiving = false
-            oldConnection.cancel()
-        }
-
-        connectionReady = false
-        clientSupportsFrameMetadata = false
-        clientIsAvcOnly = false
-        waitingForSyncFrame = true
-        inputBuffer.removeAll(keepingCapacity: true)
-        connection = newConnection
-        droppedFrames = 0
-
-        connection?.stateUpdateHandler = { [weak self] state in
+        newConnection.stateUpdateHandler = { [weak self] state in
             debugLog("Connection state: \(state)")
             switch state {
             case .ready:
                 self?.onConnectionReady(newConnection)
             case .failed(let error):
                 debugLog("Connection failed: \(error)")
-                self?.onClientDisconnected?()
+                self?.connectionEnded(newConnection)
             case .cancelled:
                 debugLog("Connection cancelled")
-                self?.onClientDisconnected?()
+                self?.connectionEnded(newConnection)
             default:
                 break
             }
         }
 
-        connection?.start(queue: networkQueue)
+        newConnection.start(queue: networkQueue)
     }
 
     private func onConnectionReady(_ conn: NWConnection) {
-        if conn.endpoint.isLoopback {
+        switch mode {
+        case .usb:
+            guard conn.endpoint.isLoopback else {
+                debugLog("Rejecting non-loopback client in USB mode")
+                conn.cancel()
+                return
+            }
             debugLog("Client connected via loopback (USB) — skipping auth")
-            beginExistingProtocol(on: conn)
-            return
+            admitConnection(conn, isWireless: false, deviceName: nil)
+        case .wireless:
+            guard let expected = expectedAuthToken else {
+                debugLog("Rejecting wireless client: no active authentication token")
+                conn.cancel()
+                return
+            }
+            // Wireless mode authenticates loopback clients as well. Otherwise
+            // any local process could take over a wireless session.
+            debugLog("Client connected via wireless listener — running auth handshake")
+            runAuthHandshake(connection: conn, expectedToken: expected)
         }
-        guard let expected = expectedAuthToken else {
-            debugLog("Rejecting non-loopback client: wireless mode not active")
+    }
+
+    private func admitConnection(
+        _ conn: NWConnection,
+        isWireless: Bool,
+        deviceName: String?
+    ) {
+        guard !isStopped else {
             conn.cancel()
             return
         }
-        debugLog("Client connected via LAN — running auth handshake")
-        runAuthHandshake(connection: conn, expectedToken: expected)
-    }
 
-    private func beginExistingProtocol(on conn: NWConnection) {
-        startReceivingTouch()
+        cancelHandshakeTimeout(for: conn)
+        let oldConnection = connection
+        activeConnectionGeneration &+= 1
+        let generation = activeConnectionGeneration
+        connection = conn
+        activeConnectionIsWireless = isWireless
+        connectionReady = false
+        clientSupportsFrameMetadata = false
+        clientIsAvcOnly = false
+        inputBuffer.removeAll(keepingCapacity: true)
+        isReceiving = false
+        droppedFrames = 0
+
+        frameQueue.async { [weak self] in
+            guard let self else { return }
+            self.framePipelineGeneration &+= 1
+            self.sendInFlight = false
+            self.pendingFrame = nil
+            self.waitingForSyncFrame = true
+        }
+
+        // Promote the authenticated candidate before cancelling the previous
+        // session. Its stale cancellation callback then cannot mutate this one.
+        if let oldConnection, oldConnection !== conn {
+            oldConnection.cancel()
+        }
+
+        if let deviceName {
+            onWirelessClientPaired?(deviceName)
+        }
+        startReceivingTouch(on: conn, generation: generation)
 
         // Give new clients a short chance to opt in before the first frame.
         // Legacy clients send no capability message, so we continue shortly
         // after this window with the old frame type.
         networkQueue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self, weak conn] in
             guard let self = self, let conn = conn else { return }
-            self.finishProtocolStartup(on: conn)
+            self.finishProtocolStartup(on: conn, generation: generation)
         }
     }
 
-    private func finishProtocolStartup(on conn: NWConnection) {
-        guard connection === conn, !isStopped, !connectionReady else { return }
+    private func connectionEnded(_ conn: NWConnection) {
+        cancelHandshakeTimeout(for: conn)
+        pendingWirelessConnections.removeValue(forKey: ObjectIdentifier(conn))
+        guard connection === conn else { return }
+        connection = nil
+        connectionReady = false
+        isReceiving = false
+        activeConnectionGeneration &+= 1
+        inputBuffer.removeAll(keepingCapacity: true)
+        onClientDisconnected?()
+    }
+
+    private func finishProtocolStartup(on conn: NWConnection, generation: UInt64) {
+        guard connection === conn,
+              activeConnectionGeneration == generation,
+              !isStopped,
+              !connectionReady else { return }
 
         let codec: StreamCodec = clientIsAvcOnly ? .h264 : .hevc
         if clientIsAvcOnly {
@@ -204,10 +346,30 @@ class StreamingServer {
     }
 
     private func runAuthHandshake(connection conn: NWConnection, expectedToken: Data) {
+        pendingWirelessConnections[ObjectIdentifier(conn)] = conn
+        let timeout = DispatchWorkItem { [weak self, weak conn] in
+            guard let self, let conn else { return }
+            guard self.pendingHandshakeTimeouts.removeValue(
+                forKey: ObjectIdentifier(conn)
+            ) != nil else { return }
+            self.pendingWirelessConnections.removeValue(
+                forKey: ObjectIdentifier(conn)
+            )
+            debugLog("Wireless authentication timed out")
+            conn.cancel()
+        }
+        pendingHandshakeTimeouts[ObjectIdentifier(conn)] = timeout
+        networkQueue.asyncAfter(deadline: .now() + .seconds(3), execute: timeout)
+
         // Read fixed prefix [magic 4][token 32][name_len 1] = 37 bytes.
-        conn.receive(minimumIncompleteLength: HandshakeCodec.fixedPrefixLen,
-                     maximumLength: HandshakeCodec.fixedPrefixLen) { [weak self] prefixData, _, _, error in
+        receiveExactly(
+            HandshakeCodec.fixedPrefixLen,
+            from: conn
+        ) { [weak self] prefixData, error in
             guard let self = self else { return }
+            guard self.pendingWirelessConnections[
+                ObjectIdentifier(conn)
+            ] === conn else { return }
             if let error = error {
                 debugLog("Auth read error: \(error)")
                 conn.cancel()
@@ -228,7 +390,10 @@ class StreamingServer {
                 return
             }
             // Read variable name.
-            conn.receive(minimumIncompleteLength: nameLen, maximumLength: nameLen) { nameData, _, _, error in
+            self.receiveExactly(nameLen, from: conn) { nameData, error in
+                guard self.pendingWirelessConnections[
+                    ObjectIdentifier(conn)
+                ] === conn else { return }
                 if let error = error {
                     debugLog("Auth name read error: \(error)")
                     conn.cancel()
@@ -242,10 +407,13 @@ class StreamingServer {
                 do {
                     let parsed = try HandshakeCodec.parseRequest(full)
                     if WirelessAuth.validate(parsed.token, expected: expectedToken) {
-                        debugLog("Wireless auth OK — device: \(parsed.deviceName)")
+                        debugLog("Wireless auth accepted")
                         self.sendAuthResponse(conn, status: .ok, thenClose: false)
-                        self.onWirelessClientPaired?(parsed.deviceName)
-                        self.beginExistingProtocol(on: conn)
+                        self.admitConnection(
+                            conn,
+                            isWireless: true,
+                            deviceName: parsed.deviceName
+                        )
                     } else {
                         debugLog("Wireless auth rejected: token mismatch")
                         self.sendAuthResponse(conn, status: .invalidToken, thenClose: true)
@@ -259,6 +427,53 @@ class StreamingServer {
                 }
             }
         }
+    }
+
+    private func receiveExactly(
+        _ count: Int,
+        from conn: NWConnection,
+        accumulated: Data = Data(),
+        completion: @escaping (Data?, Error?) -> Void
+    ) {
+        guard accumulated.count < count else {
+            completion(accumulated, nil)
+            return
+        }
+        conn.receive(
+            minimumIncompleteLength: 1,
+            maximumLength: count - accumulated.count
+        ) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let error {
+                completion(nil, error)
+                return
+            }
+            var next = accumulated
+            if let data {
+                next.append(data)
+            }
+            guard next.count < count else {
+                completion(next, nil)
+                return
+            }
+            guard !isComplete, data?.isEmpty == false else {
+                completion(nil, NWError.posix(.ECONNRESET))
+                return
+            }
+            self.receiveExactly(
+                count,
+                from: conn,
+                accumulated: next,
+                completion: completion
+            )
+        }
+    }
+
+    private func cancelHandshakeTimeout(for conn: NWConnection) {
+        pendingHandshakeTimeouts.removeValue(
+            forKey: ObjectIdentifier(conn)
+        )?.cancel()
+        pendingWirelessConnections.removeValue(forKey: ObjectIdentifier(conn))
     }
 
     private func sendAuthResponse(_ conn: NWConnection, status: HandshakeStatus, thenClose: Bool) {
@@ -296,47 +511,53 @@ class StreamingServer {
         debugLog("Sent display config: \(displayWidth)x\(displayHeight) @ \(rotation)°")
     }
 
-    private func startReceivingTouch() {
-        guard !isReceiving else {
-            debugLog("Already receiving touch events")
-            return
-        }
+    private func startReceivingTouch(on conn: NWConnection, generation: UInt64) {
         isReceiving = true
         debugLog("Starting input receive loop... (touch=\(touchEnabled ? "on" : "off"))")
 
-        // Use loop-based pattern instead of recursion to prevent stack overflow
         receiveQueue.async { [weak self] in
-            self?.touchReceiveLoop()
+            self?.touchReceiveLoop(on: conn, generation: generation)
         }
     }
 
-    private func touchReceiveLoop() {
-        guard let connection = connection, isReceiving, !isStopped else {
-            isReceiving = false
-            return
-        }
+    private func touchReceiveLoop(on conn: NWConnection, generation: UInt64) {
+        guard connection === conn,
+              activeConnectionGeneration == generation,
+              isReceiving,
+              !isStopped else { return }
 
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, isComplete, error in
-            guard let self = self, self.isReceiving, !self.isStopped else { return }
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, isComplete, error in
+            guard let self,
+                  self.connection === conn,
+                  self.activeConnectionGeneration == generation,
+                  self.isReceiving,
+                  !self.isStopped else { return }
 
             if error != nil || isComplete {
                 self.isReceiving = false
                 self.inputBuffer.removeAll(keepingCapacity: true)
+                self.connectionEnded(conn)
                 return
             }
 
             if let data = data, !data.isEmpty {
                 self.inputBuffer.append(data)
-                self.processInputBuffer(connection: connection)
+                self.processInputBuffer(
+                    connection: conn,
+                    generation: generation
+                )
             }
 
             self.receiveQueue.async {
-                self.touchReceiveLoop()
+                self.touchReceiveLoop(on: conn, generation: generation)
             }
         }
     }
 
-    private func processInputBuffer(connection: NWConnection) {
+    private func processInputBuffer(
+        connection: NWConnection,
+        generation: UInt64
+    ) {
         while let msgType = inputBuffer.first {
             switch msgType {
             case WireMessage.touchEvent:
@@ -392,7 +613,10 @@ class StreamingServer {
                     clientSupportsFrameMetadata = true
                     debugLog("Client supports video frame metadata")
                 }
-                finishProtocolStartup(on: connection)
+                finishProtocolStartup(
+                    on: connection,
+                    generation: generation
+                )
 
             case WireMessage.clientAvcOnly:
                 // Payload-free opt-in (same convention as type 8): the client
@@ -442,34 +666,92 @@ class StreamingServer {
     func sendFrame(_ data: Data, timestamp: UInt64, isKeyframe: Bool = false) {
         guard let connection = connection, !isStopped, connectionReady else { return }
 
-        // With short-GOP encoding, a fresh client must start on a keyframe —
-        // sending P-frames before the first IDR would feed garbage to its decoder.
-        if waitingForSyncFrame {
-            guard isKeyframe else {
-                droppedFrames += 1
-                return
-            }
-            waitingForSyncFrame = false
-            debugLog("First keyframe sent to new client")
-        }
-
-        // No frame-age dropping or backpressure — send everything immediately.
-        // The encode queue depth limit (2 pending) in ScreenCapture handles flow control.
         frameQueue.async { [weak self] in
             guard let self = self else { return }
+            guard self.connection === connection, !self.isStopped, self.connectionReady else { return }
 
-            let packet = self.makeFramePacket(data, timestamp: timestamp, isKeyframe: isKeyframe)
+            // With short-GOP encoding, a fresh client must start on an IDR.
+            if self.waitingForSyncFrame {
+                guard isKeyframe else {
+                    self.droppedFrames += 1
+                    return
+                }
+                self.waitingForSyncFrame = false
+                debugLog("First keyframe queued for new client")
+            }
 
-            connection.send(content: packet, completion: .contentProcessed { error in
-                if error != nil {
+            let frame = PendingFrame(
+                data: data,
+                timestamp: timestamp,
+                isKeyframe: isKeyframe,
+                connection: connection,
+                generation: self.framePipelineGeneration
+            )
+
+            guard self.sendInFlight else {
+                self.transmit(frame)
+                return
+            }
+
+            if let pending = self.pendingFrame {
+                if pending.isKeyframe && !isKeyframe {
+                    // Keep the recovery point and discard dependent frames until
+                    // it has entered the TCP stream.
+                    self.droppedFrames += 1
+                } else if isKeyframe {
+                    // A newer independent recovery point can safely replace any
+                    // unsent frame.
+                    self.pendingFrame = frame
+                    self.droppedFrames += 1
+                } else {
+                    // Dropping an arbitrary P-frame would break the decoder's
+                    // reference chain. Discard the short backlog and request an
+                    // IDR, then reject P-frames until it arrives.
+                    self.pendingFrame = nil
+                    self.waitingForSyncFrame = true
+                    self.droppedFrames += 2
+                    self.onKeyframeRequested?(true)
+                }
+            } else {
+                self.pendingFrame = frame
+            }
+        }
+    }
+
+    /// Must be called on frameQueue.
+    private func transmit(_ frame: PendingFrame) {
+        guard connection === frame.connection,
+              frame.generation == framePipelineGeneration,
+              !isStopped,
+              connectionReady else { return }
+
+        sendInFlight = true
+        let packet = makeFramePacket(
+            frame.data,
+            timestamp: frame.timestamp,
+            isKeyframe: frame.isKeyframe
+        )
+
+        frame.connection.send(content: packet, completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            self.frameQueue.async {
+                guard frame.generation == self.framePipelineGeneration,
+                      self.connection === frame.connection else { return }
+
+                self.sendInFlight = false
+                if error == nil {
+                    let sendAge = DispatchTime.now().uptimeNanoseconds - frame.timestamp
+                    self.updateStats(bytes: frame.data.count, frameAgeNs: sendAge)
+                } else {
                     self.droppedFrames += 1
                 }
-            })
 
-            // Track frame age at send time for pipeline profiling
-            let sendAge = DispatchTime.now().uptimeNanoseconds - timestamp
-            self.updateStats(bytes: data.count, frameAgeNs: sendAge)
-        }
+                if let next = self.pendingFrame {
+                    self.pendingFrame = nil
+                    self.transmit(next)
+                }
+            }
+        })
     }
 
     private func makeFramePacket(_ data: Data, timestamp: UInt64, isKeyframe: Bool) -> Data {
@@ -533,17 +815,54 @@ class StreamingServer {
         }
     }
 
+    /// Installs a new bearer token and immediately revokes every in-flight or
+    /// authenticated wireless session that could have observed the old token.
+    func rotateAuthToken(_ token: Data) {
+        precondition(token.count == 32)
+        networkQueue.async { [weak self] in
+            guard let self else { return }
+            self.expectedAuthToken = token
+            for (_, timeout) in self.pendingHandshakeTimeouts {
+                timeout.cancel()
+            }
+            self.pendingHandshakeTimeouts.removeAll()
+            for (_, pendingConnection) in self.pendingWirelessConnections {
+                pendingConnection.cancel()
+            }
+            self.pendingWirelessConnections.removeAll()
+            if self.activeConnectionIsWireless {
+                self.connection?.cancel()
+            }
+        }
+    }
+
     func stop() {
         isStopped = true
         isReceiving = false
+        activeConnectionGeneration &+= 1
+        for (_, timeout) in pendingHandshakeTimeouts {
+            timeout.cancel()
+        }
+        pendingHandshakeTimeouts.removeAll()
+        for (_, pendingConnection) in pendingWirelessConnections {
+            pendingConnection.cancel()
+        }
+        pendingWirelessConnections.removeAll()
 
-        // Wait for pending operations before cancelling
-        frameQueue.sync {}
+        // Invalidate completions from the old connection and discard its newest
+        // unsent frame before cancelling.
+        frameQueue.sync {
+            framePipelineGeneration &+= 1
+            sendInFlight = false
+            pendingFrame = nil
+        }
         receiveQueue.sync {}
 
         connection?.cancel()
         listener?.cancel()
         connection = nil
         listener = nil
+        connectionReady = false
+        activeConnectionIsWireless = false
     }
 }

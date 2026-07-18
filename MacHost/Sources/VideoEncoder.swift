@@ -22,7 +22,7 @@ class VideoEncoder {
         self.width = width
         self.height = height
         self.codec = codec
-        self.bitrateMbps = gamingBoost ? 50 : bitrateMbps
+        self.bitrateMbps = gamingBoost ? 45 : bitrateMbps
         self.quality = gamingBoost ? "ultralow" : quality
         self.gamingBoost = gamingBoost
         self.frameRate = frameRate
@@ -30,7 +30,7 @@ class VideoEncoder {
     }
 
     func updateSettings(bitrateMbps: Int, quality: String, gamingBoost: Bool) {
-        self.bitrateMbps = gamingBoost ? 50 : bitrateMbps
+        self.bitrateMbps = gamingBoost ? 45 : bitrateMbps
         self.quality = gamingBoost ? "ultralow" : quality
         self.gamingBoost = gamingBoost
 
@@ -76,10 +76,11 @@ class VideoEncoder {
             : kVTProfileLevel_H264_Main_AutoLevel
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
 
-        // Dynamic bitrate - remove strict rate limiting for smoother streaming
-        // All-intra needs higher bitrate for text sharpness
-        // USB-C supports 5Gbps, so 80-100Mbps is fine
-        let effectiveBitrate = gamingBoost ? bitrateMbps : max(bitrateMbps, 60)
+        // The target SM-P610 has a USB-C connector but only a USB 2.0 data link.
+        // Respect the configured bitrate instead of silently forcing 60 Mbps.
+        // HEVC desktop content remains sharp at 25-50 Mbps and leaves ample room
+        // for ADB framing bursts on a 480 Mbps signalling link.
+        let effectiveBitrate = gamingBoost ? 45 : bitrateMbps
         let bitrateBps = effectiveBitrate * 1_000_000
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrateBps as CFNumber)
         // Removed DataRateLimits - was causing bursty traffic and buffer stalls
@@ -153,7 +154,7 @@ class VideoEncoder {
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
             : nil
 
-        VTCompressionSessionEncodeFrame(
+        let encodeStatus = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTimeStamp,
@@ -162,6 +163,12 @@ class VideoEncoder {
             sourceFrameRefcon: refconValue,
             infoFlagsOut: nil
         )
+        if encodeStatus != noErr {
+            // VideoToolbox does not invoke the output callback when submission
+            // itself fails, so ownership of the timestamp allocation remains here.
+            refconValue.deallocate()
+            debugLog("VideoToolbox frame submission failed: \(encodeStatus)")
+        }
     }
 
     deinit {
@@ -176,15 +183,8 @@ class VideoEncoder {
 private let nalStartCode: [UInt8] = [0, 0, 0, 1]
 
 private let encodingOutputCallback: VTCompressionOutputCallback = { (outputCallbackRefCon, sourceFrameRefCon, status, _, sampleBuffer) in
-    guard status == noErr,
-          let sampleBuffer = sampleBuffer,
-          let refcon = outputCallbackRefCon else {
-        return
-    }
-
-    let encoder = Unmanaged<VideoEncoder>.fromOpaque(refcon).takeUnretainedValue()
-
-    // Get timestamp for frame age tracking
+    // The timestamp allocation belongs to exactly one successful submission.
+    // Release it even when VideoToolbox reports an asynchronous encode failure.
     let timestamp: UInt64
     if let refcon = sourceFrameRefCon {
         timestamp = refcon.load(as: UInt64.self)
@@ -192,6 +192,17 @@ private let encodingOutputCallback: VTCompressionOutputCallback = { (outputCallb
     } else {
         timestamp = DispatchTime.now().uptimeNanoseconds
     }
+
+    guard status == noErr,
+          let sampleBuffer = sampleBuffer,
+          let refcon = outputCallbackRefCon else {
+        if status != noErr {
+            debugLog("VideoToolbox encode callback failed: \(status)")
+        }
+        return
+    }
+
+    let encoder = Unmanaged<VideoEncoder>.fromOpaque(refcon).takeUnretainedValue()
 
     // Extract encoded data
     guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }

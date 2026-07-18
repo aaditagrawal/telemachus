@@ -2,7 +2,7 @@ import Foundation
 import VideoToolbox
 import CoreMedia
 
-/// Minimal H.265 encoder for testing - same config as SideScreen's VideoEncoder
+/// Minimal H.265 encoder for testing - same config as Telemachus's VideoEncoder
 class TestEncoder {
     private var session: VTCompressionSession?
     var onEncodedFrame: ((Data, Bool) -> Void)?  // data, isKeyframe
@@ -44,21 +44,40 @@ class TestEncoder {
 
         self.session = session
 
-        // Same settings as SideScreen's VideoEncoder
+        // Same settings as Telemachus's VideoEncoder
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: (bitrateMbps * 1_000_000) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: frameRate as CFNumber)
 
-        let keyframeInterval = frameRate / 2  // 0.5 second
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 0.5 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: frameRate as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.5 as CFNumber)
 
-        VTCompressionSessionPrepareToEncodeFrames(session)
+        let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
+        guard prepareStatus == noErr else {
+            print("[FAIL] VTCompressionSessionPrepareToEncodeFrames failed: \(prepareStatus)")
+            return
+        }
+
+        let hardwareValuePointer = UnsafeMutablePointer<CFTypeRef?>.allocate(capacity: 1)
+        hardwareValuePointer.initialize(to: nil)
+        defer {
+            hardwareValuePointer.deinitialize(count: 1)
+            hardwareValuePointer.deallocate()
+        }
+        let hardwareStatus = VTSessionCopyProperty(
+            session,
+            key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
+            allocator: kCFAllocatorDefault,
+            valueOut: hardwareValuePointer
+        )
+        let hardwareValue = hardwareValuePointer.pointee
+        let usingHardware = hardwareStatus == noErr && (hardwareValue as? Bool == true)
         print("[OK] H.265 encoder created: \(width)x\(height) @ \(frameRate)fps, \(bitrateMbps)Mbps")
+        print("     Hardware accelerated: \(usingHardware ? "YES" : "NO/UNKNOWN")")
     }
 
     func encode(pixelBuffer: CVPixelBuffer, presentationTimeStamp: CMTime) {

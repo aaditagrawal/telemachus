@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SideScreen",
+    name: "Telemachus",
     platforms: [
         // Floor is ScreenCaptureKit basics (12.3) + OSAllocatedUnfairLock /
         // SCStreamConfiguration.capturesAudio (13.0). CGVirtualDisplay is a
@@ -11,12 +11,12 @@ let package = Package(
     ],
     products: [
         .executable(
-            name: "SideScreen",
-            targets: ["SideScreen"])
+            name: "Telemachus",
+            targets: ["Telemachus"])
     ],
     targets: [
         .executableTarget(
-            name: "SideScreen",
+            name: "Telemachus",
             dependencies: [],
             path: "Sources",
             cSettings: [
@@ -26,9 +26,9 @@ let package = Package(
                 .unsafeFlags(["-Xcc", "-fmodule-map-file=Sources/module.modulemap"])
             ]),
         .testTarget(
-            name: "SideScreenTests",
-            dependencies: ["SideScreen"],
-            path: "Tests/SideScreenTests",
+            name: "TelemachusTests",
+            dependencies: ["Telemachus"],
+            path: "Tests/TelemachusTests",
             cSettings: [
                 .unsafeFlags(["-I", "Sources"])
             ],

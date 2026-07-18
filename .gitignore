@@ -16,6 +16,10 @@ AndroidClient/.idea/
 *.dmg
 *.iml
 *.keystore
+*.jks
+*.p12
+*.key
+keystore.properties
 
 # macOS build (main + test apps)
 **/.build/
@@ -47,11 +51,12 @@ dist/
 
 # Env
 .env
-.env.local
+.env.*
 *.pem
 
-# Docs (local design docs)
-docs/
+# Private local notes (public documentation under docs/ is tracked)
+docs/private/
+docs/local/
 
 # Temporary
 tmp/

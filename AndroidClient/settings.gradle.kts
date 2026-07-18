@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SideScreen"
+rootProject.name = "Telemachus"
 include(":app")

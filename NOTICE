@@ -1,0 +1,16 @@
+Telemachus
+Copyright 2026 Telemachus contributors
+
+Telemachus is a fork of SideScreen, originally created by Tran Vuong Quoc Dat
+and developed with the SideScreen contributors:
+https://github.com/tranvuongquocdat/SideScreen
+
+SideScreen established the foundational virtual-display, capture, encoding,
+ADB/TCP transport, Android decoding, wireless-pairing, and touch-input
+implementation used by this fork. The original SideScreen copyright and MIT
+License notice are preserved in LICENSE. See THIRD_PARTY_NOTICES.md for
+dependency and asset notices.
+
+Telemachus uses private, unsupported macOS CGVirtualDisplay APIs to create a
+virtual display. Those APIs are not licensed or endorsed as a public Apple SDK,
+may change without notice, and may limit App Store distribution.

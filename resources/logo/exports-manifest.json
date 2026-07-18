@@ -1,0 +1,109 @@
+{
+  "assets" : [
+    {
+      "height" : 1254,
+      "path" : "resources/logo/main_logo.png",
+      "role" : "repository and documentation",
+      "sha256" : "5be28fcebeeb31d182feadebc60fbf307b2a3f9f577fdc249c82ba4d4f5c8315",
+      "width" : 1254
+    },
+    {
+      "height" : 512,
+      "path" : "website/assets/main_logo.png",
+      "role" : "website",
+      "sha256" : "03af35fa45a93aaf789ddd7cc548f5ca1be2a86da5feabea90a9cec00d9f8aac",
+      "width" : 512
+    },
+    {
+      "height" : 16,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_16x16.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "d665fa7d516317699be7883aa09b0ab0009ec4fd129187f25be718847b177a6c",
+      "width" : 16
+    },
+    {
+      "height" : 32,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_16x16@2x.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "3a5ec148f7e35cf4a12efd9780c51b504eeb455b1473865498379b356bc2b6f9",
+      "width" : 32
+    },
+    {
+      "height" : 32,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_32x32.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "3a5ec148f7e35cf4a12efd9780c51b504eeb455b1473865498379b356bc2b6f9",
+      "width" : 32
+    },
+    {
+      "height" : 64,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_32x32@2x.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "1385f8bf75ef6ac68910e44700e3830e9668bb5ae958638eccd2bec6d6b82b52",
+      "width" : 64
+    },
+    {
+      "height" : 128,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_128x128.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "5e350cf80df24a2dd618eac8668e14d13977b558649159ea0d9498f1aec550be",
+      "width" : 128
+    },
+    {
+      "height" : 256,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_128x128@2x.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "c881349a34ebc6f7271a8bcc65261feb1efd5b0d9d081ee33ca2dad2b5c546fc",
+      "width" : 256
+    },
+    {
+      "height" : 256,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_256x256.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "c881349a34ebc6f7271a8bcc65261feb1efd5b0d9d081ee33ca2dad2b5c546fc",
+      "width" : 256
+    },
+    {
+      "height" : 512,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_256x256@2x.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "03af35fa45a93aaf789ddd7cc548f5ca1be2a86da5feabea90a9cec00d9f8aac",
+      "width" : 512
+    },
+    {
+      "height" : 512,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_512x512.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "03af35fa45a93aaf789ddd7cc548f5ca1be2a86da5feabea90a9cec00d9f8aac",
+      "width" : 512
+    },
+    {
+      "height" : 1024,
+      "path" : "MacHost/Resources/AppIcon.iconset/icon_512x512@2x.png",
+      "role" : "macOS AppIcon",
+      "sha256" : "bfb6f5c912afd5d16c2892d80b84c6aa504abc584024d2ab95a7316456e9be07",
+      "width" : 1024
+    }
+  ],
+  "exporter" : "scripts/export-icons.swift",
+  "identity" : "Companion Screens",
+  "master" : {
+    "height" : 1254,
+    "path" : "resources/logo/telemachus-icon-master.png",
+    "sha256" : "5be28fcebeeb31d182feadebc60fbf307b2a3f9f577fdc249c82ba4d4f5c8315",
+    "width" : 1254
+  },
+  "provenance" : {
+    "externalArtworkUsed" : false,
+    "method" : "Original Telemachus outline-icon brief",
+    "sideScreenArtworkUsed" : false,
+    "source" : "Approved project-specific raster master"
+  },
+  "supplementalAssets" : [
+    {
+      "path" : "MacHost/Resources/AppIcon.icns",
+      "role" : "macOS packaged icon",
+      "sha256" : "a9e09406787cf1047eea07ffc0b6ba0bc4883e07a442155c7e2c141bee5be86d"
+    }
+  ]
+}

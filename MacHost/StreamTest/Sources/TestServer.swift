@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// Minimal TCP server that matches SideScreen's protocol exactly
+/// Minimal TCP server that matches Telemachus's protocol exactly
 /// Protocol:
 ///   Display config: [type=1][width:4B BE][height:4B BE][rotation:4B BE]
 ///   Video metadata: [type=6][size:4B BE][flags:1B][timestamp:8B BE][H.265 data]
@@ -13,12 +13,17 @@ class TestServer {
     private let sendQueue = DispatchQueue(label: "testserver.send", qos: .userInteractive)
     var onClientConnected: (() -> Void)?
     var onClientDisconnected: (() -> Void)?
+    var onKeyframeRequested: (() -> Void)?
 
     private(set) var isClientConnected = false
     private var framesSent: UInt64 = 0
     private var bytesSent: UInt64 = 0
     private var framesDropped: UInt64 = 0
+    private var pingsAnswered: UInt64 = 0
+    private var touchEventsReceived: UInt64 = 0
     private var canSendNext = true
+    private var inputBuffer = Data()
+    private var isReceiving = false
 
     init(port: UInt16) {
         self.port = port
@@ -58,6 +63,10 @@ class TestServer {
         framesSent = 0
         bytesSent = 0
         framesDropped = 0
+        pingsAnswered = 0
+        touchEventsReceived = 0
+        inputBuffer.removeAll(keepingCapacity: true)
+        isReceiving = false
         isClientConnected = false
 
         newConnection.stateUpdateHandler = { [weak self] state in
@@ -68,6 +77,7 @@ class TestServer {
             case .failed, .cancelled:
                 print("[INFO] Client disconnected")
                 self?.isClientConnected = false
+                self?.isReceiving = false
                 self?.onClientDisconnected?()
             default: break
             }
@@ -78,8 +88,73 @@ class TestServer {
     private func finishClientStartup(on conn: NWConnection) {
         guard connection === conn, !isClientConnected else { return }
         print("[OK] Frame metadata: enabled")
+        isReceiving = true
+        receiveClientInput(on: conn)
         onClientConnected?()
         isClientConnected = true
+    }
+
+    private func receiveClientInput(on conn: NWConnection) {
+        guard connection === conn, isReceiving else { return }
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 256) { [weak self] data, _, complete, error in
+            guard let self, self.connection === conn, self.isReceiving else { return }
+            if let data, !data.isEmpty {
+                self.inputBuffer.append(data)
+                self.processClientInput(on: conn)
+            }
+            if complete || error != nil {
+                self.isReceiving = false
+                return
+            }
+            self.receiveClientInput(on: conn)
+        }
+    }
+
+    private func processClientInput(on conn: NWConnection) {
+        while let type = inputBuffer.first {
+            switch type {
+            case 2:
+                guard inputBuffer.count >= 2 else { return }
+                let pointerCount = Int(inputBuffer[inputBuffer.startIndex + 1])
+                guard pointerCount == 1 || pointerCount == 2 else {
+                    inputBuffer.removeFirst()
+                    continue
+                }
+                let messageSize = 2 + pointerCount * 8 + 4
+                guard inputBuffer.count >= messageSize else { return }
+                inputBuffer.removeFirst(messageSize)
+                touchEventsReceived += 1
+                if touchEventsReceived <= 3 {
+                    print("[INPUT] Touch packet received (pointers=\(pointerCount))")
+                }
+
+            case 4:
+                guard inputBuffer.count >= 9 else { return }
+                let timestamp = Data(inputBuffer.dropFirst().prefix(8))
+                inputBuffer.removeFirst(9)
+                var pong = Data([5])
+                pong.append(timestamp)
+                conn.send(content: pong, completion: .contentProcessed { _ in })
+                pingsAnswered += 1
+
+            case 7:
+                guard inputBuffer.count >= 2 else { return }
+                inputBuffer.removeFirst(2)
+                onKeyframeRequested?()
+
+            case 8:
+                inputBuffer.removeFirst()
+                print("[OK] Client advertised frame metadata support")
+
+            case 9:
+                inputBuffer.removeFirst()
+                print("[INFO] Client requested AVC fallback (test stream remains HEVC)")
+
+            default:
+                print("[WARN] Unknown client input type \(type); discarding one byte")
+                inputBuffer.removeFirst()
+            }
+        }
     }
 
     /// Send display size config (must be sent before frames)
@@ -94,7 +169,7 @@ class TestServer {
         print("[OK] Sent display config: \(width)x\(height) @ \(rotation) deg")
     }
 
-    /// Send a video frame (same protocol as SideScreen)
+    /// Send a video frame (same protocol as Telemachus)
     func sendFrame(_ data: Data, isKeyframe: Bool) {
         guard let connection = connection, isClientConnected else { return }
 
@@ -127,6 +202,7 @@ class TestServer {
 
     func printStats() {
         print("  Frames sent: \(framesSent), dropped: \(framesDropped), bytes: \(bytesSent / 1024)KB")
+        print("  Pings answered: \(pingsAnswered), touch packets: \(touchEventsReceived)")
     }
 
     func stop() {

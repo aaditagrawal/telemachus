@@ -8,17 +8,18 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
 let processInfo = ProcessInfo.processInfo
+let displayOnly = CommandLine.arguments.contains("--display-only")
 print("========================================")
-print("  SideScreen Capture API Test")
+print("  Telemachus Capture API Test")
 print("========================================")
 print("macOS version: \(processInfo.operatingSystemVersionString)")
 print("")
 
 // MARK: - Create Virtual Display
 
-print("--- Creating CGVirtualDisplay (1920x1200 @ 60Hz) ---")
+print("--- Creating CGVirtualDisplay (2000x1200 @ 60Hz) ---")
 
-let width: UInt32 = 1920
+let width: UInt32 = 2000
 let height: UInt32 = 1200
 let refreshRate: Double = 60.0
 
@@ -79,6 +80,13 @@ if found {
     print("       Tests may fail. Continuing anyway...")
 }
 print("")
+
+if displayOnly {
+    print("[PASS] Display-only validation complete; keeping it online for 3s")
+    Thread.sleep(forTimeInterval: 3)
+    _ = virtualDisplay
+    exit(0)
+}
 
 // MARK: - Run Tests
 

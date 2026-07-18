@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telemachus Display Benchmark</title>
+  <style>
+    html, body, canvas {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #050505;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="benchmark"></canvas>
+  <script>
+    const canvas = document.querySelector("#benchmark");
+    const context = canvas.getContext("2d", { alpha: false });
+    const params = new URLSearchParams(location.search);
+    const mode = params.get("mode") ?? "sweep";
+    let frame = 0;
+    let lastSecond = performance.now();
+    let framesThisSecond = 0;
+    let browserFps = 0;
+
+    function resize() {
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(innerWidth * scale);
+      canvas.height = Math.floor(innerHeight * scale);
+      context.setTransform(scale, 0, 0, scale, 0, 0);
+    }
+
+    function drawSweep(now) {
+      const stripeWidth = 96;
+      const offset = (now * 0.38) % (stripeWidth * 2);
+      for (let x = -stripeWidth * 2; x < innerWidth + stripeWidth * 2; x += stripeWidth) {
+        context.fillStyle = ((x / stripeWidth) & 1) ? "#f2f2f2" : "#111";
+        context.fillRect(x + offset, 0, stripeWidth, innerHeight);
+      }
+
+      const y = (now * 0.24) % innerHeight;
+      context.fillStyle = "#ff3158";
+      context.fillRect(0, y, innerWidth, 8);
+      context.fillStyle = "#2ae8ff";
+      context.fillRect(innerWidth - ((now * 0.55) % innerWidth), 0, 8, innerHeight);
+    }
+
+    function drawStress() {
+      const tile = 24;
+      for (let y = 0; y < innerHeight; y += tile) {
+        for (let x = 0; x < innerWidth; x += tile) {
+          const seed = ((x * 31 + y * 17 + frame * 97) >>> 0);
+          context.fillStyle = `hsl(${seed % 360} 85% ${35 + (seed % 35)}%)`;
+          context.fillRect(x, y, tile, tile);
+        }
+      }
+    }
+
+    function render(now) {
+      if (mode === "static") {
+        context.fillStyle = "#101216";
+        context.fillRect(0, 0, innerWidth, innerHeight);
+      } else if (mode === "stress") {
+        drawStress();
+      } else {
+        drawSweep(now);
+      }
+
+      framesThisSecond++;
+      if (now - lastSecond >= 1000) {
+        browserFps = framesThisSecond * 1000 / (now - lastSecond);
+        framesThisSecond = 0;
+        lastSecond = now;
+      }
+
+      context.fillStyle = "rgba(0, 0, 0, 0.78)";
+      context.fillRect(24, 24, 440, 116);
+      context.fillStyle = "#fff";
+      context.font = "700 30px -apple-system, sans-serif";
+      context.fillText(`TELEMACHUS · ${mode.toUpperCase()}`, 44, 68);
+      context.font = "500 20px ui-monospace, monospace";
+      context.fillText(`Browser: ${browserFps.toFixed(1)} fps`, 44, 102);
+      context.fillText(`Frame: ${frame}`, 250, 102);
+
+      frame++;
+      requestAnimationFrame(render);
+    }
+
+    addEventListener("resize", resize);
+    resize();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
