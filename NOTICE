@@ -8,8 +8,7 @@ https://github.com/tranvuongquocdat/SideScreen
 SideScreen established the foundational virtual-display, capture, encoding,
 ADB/TCP transport, Android decoding, wireless-pairing, and touch-input
 implementation used by this fork. The original SideScreen copyright and MIT
-License notice are preserved in LICENSE. See THIRD_PARTY_NOTICES.md for
-dependency and asset notices.
+License notice are preserved in LICENSE.
 
 Telemachus uses private, unsupported macOS CGVirtualDisplay APIs to create a
 virtual display. Those APIs are not licensed or endorsed as a public Apple SDK,

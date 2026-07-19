@@ -31,16 +31,12 @@ jobs:
             exit 1
           }
 
-      - name: Require tag, VERSION, and changelog to agree
+      - name: Require a semantic-version tag with a matching changelog
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          test "$GITHUB_REF_NAME" = "$VERSION" || {
-            echo "Tag '$GITHUB_REF_NAME' does not equal VERSION '$VERSION'."
-            exit 1
-          }
+          VERSION="$GITHUB_REF_NAME"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -Fq "## [$VERSION]" CHANGELOG.md
           UNRELEASED="$(awk '
@@ -58,6 +54,8 @@ jobs:
   build-mac:
     needs: validate
     runs-on: macos-14
+    env:
+      TELEMACHUS_VERSION: ${{ needs.validate.outputs.version }}
     outputs:
       release_mode: ${{ steps.signing.outputs.mode }}
       artifact_suffix: ${{ steps.signing.outputs.suffix }}
@@ -199,6 +197,8 @@ jobs:
   build-android:
     needs: validate
     runs-on: ubuntu-24.04
+    env:
+      TELEMACHUS_VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -306,9 +306,9 @@ jobs:
           name: android-apk
           path: artifacts
 
-      - name: Add legal notices and consolidated checksums
+      - name: Add licenses and consolidated checksums
         run: |
-          cp LICENSE NOTICE THIRD_PARTY_NOTICES.md PRIVACY.md artifacts/
+          cp LICENSE NOTICE artifacts/
           cp licenses/Apache-2.0.txt artifacts/
           (
             cd artifacts
@@ -353,8 +353,6 @@ jobs:
             artifacts/SHA256SUMS
             artifacts/LICENSE
             artifacts/NOTICE
-            artifacts/THIRD_PARTY_NOTICES.md
-            artifacts/PRIVACY.md
             artifacts/Apache-2.0.txt
             artifacts/Android-runtime-dependency-licenses.md
           draft: false

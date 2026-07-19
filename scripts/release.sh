@@ -5,9 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="$(tr -d '[:space:]' < VERSION)"
+VERSION="${1:-}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "VERSION must be a semantic version, got '$VERSION'." >&2
+    echo "Usage: $0 <major.minor.patch>" >&2
     exit 1
 fi
 grep -Fq "## [$VERSION]" CHANGELOG.md || {

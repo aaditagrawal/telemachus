@@ -4,11 +4,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$SCRIPT_DIR/android-env.sh"
-VERSION=$(cat "$ROOT_DIR/VERSION" | tr -d '[:space:]')
 APP_DIR="$ROOT_DIR/Telemachus.app"
 
 echo "======================================="
-echo "  Telemachus - Dev Test (v$VERSION)"
+echo "  Telemachus - Dev Test"
 echo "======================================="
 echo ""
 

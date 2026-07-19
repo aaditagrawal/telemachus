@@ -228,6 +228,7 @@ Include:
 If you have questions about contributing, feel free to:
 - Ask in an issue with the `question` label
 
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Report vulnerabilities through
+[GitHub private vulnerability reporting](https://github.com/aaditagrawal/telemachus/security/advisories/new).
 
 Thank you for contributing to Telemachus!

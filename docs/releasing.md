@@ -1,8 +1,8 @@
 # Release Guide
 
 Releases are intentionally stricter than local development builds. A public
-release tag must exactly equal `VERSION`, have a matching `CHANGELOG.md`
-section, and be pushed from a clean commit that has passed CI.
+release tag must be a semantic version, have a matching `CHANGELOG.md` section,
+and be pushed from a clean commit that has passed CI.
 
 ## Declare repository ownership
 
@@ -84,14 +84,13 @@ Contributors can create the same source artifact locally with
 
 ## Publish
 
-Update `VERSION` and move the completed changes from `Unreleased` into a
-matching version section. The release gate permits a standing `Planned`
-subsection but refuses tags while completed Added, Changed, Fixed, or Security
-entries remain unreleased. Commit and push the clean release commit. After CI
-passes:
+Move the completed changes from `Unreleased` into a matching version section.
+The release gate permits a standing `Planned` subsection but refuses tags while
+completed Added, Changed, Fixed, or Security entries remain unreleased. Commit
+and push the clean release commit. After CI passes:
 
 ```bash
-TELEMACHUS_RELEASE_CONFIRM="$(cat VERSION)" ./scripts/release.sh
+TELEMACHUS_RELEASE_CONFIRM=0.12.0 ./scripts/release.sh 0.12.0
 ```
 
 The release workflow publishes the APK, DMG, legal notices and dependency

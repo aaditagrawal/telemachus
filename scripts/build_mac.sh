@@ -5,10 +5,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Read version
-VERSION=$(cat "$ROOT_DIR/VERSION" | tr -d '[:space:]')
-echo "Building version $VERSION..."
-
 cd "$ROOT_DIR/MacHost"
 
 # Kill running instance

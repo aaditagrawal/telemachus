@@ -40,12 +40,12 @@ What you expected to happen.
 
 What actually happened.
 
-## Screenshots / Logs
+## Logs
 
-If applicable, add screenshots or log output to help explain the problem.
-Remove pairing QR codes, tokens, network addresses, device names, and private
-screen content before posting. Report vulnerabilities privately according to
-`SECURITY.md`.
+If applicable, add log output to help explain the problem. Remove pairing QR
+codes, tokens, network addresses, device names, and private screen content
+before posting. Report vulnerabilities through
+[GitHub private vulnerability reporting](https://github.com/aaditagrawal/telemachus/security/advisories/new).
 
 <details>
 <summary>Log output (if available)</summary>

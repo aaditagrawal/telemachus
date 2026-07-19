@@ -236,10 +236,8 @@ SideScreen established the architecture Telemachus continues to use:
 Telemachus would not exist without that work. Credit for those ideas and
 implementations belongs to Tran Vuong Quoc Dat and every SideScreen
 contributor. The original copyright and MIT License notice remain in
-[LICENSE](LICENSE). Additional lineage and dependency notices are in
-[NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Attribution is also included in both applications and packaged release
-materials.
+[LICENSE](LICENSE), with additional lineage in [NOTICE](NOTICE). Attribution
+is also included in both applications and packaged release materials.
 
 ### Why maintain this fork?
 
@@ -270,13 +268,10 @@ fork commit.
 
 ## Documentation
 
-- [Security policy](SECURITY.md)
-- [Privacy](PRIVACY.md)
 - [Threat model](docs/threat-model.md)
 - [Wire protocol](docs/protocol.md)
 - [Release guide](docs/releasing.md)
 - [Contributing](CONTRIBUTING.md)
-- [Support](SUPPORT.md)
 
 ## License
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
+VERSION="${TELEMACHUS_VERSION:-0.0.0}"
 BINARY="${TELEMACHUS_BINARY:-$ROOT_DIR/MacHost/.build/release-universal/Telemachus}"
 APP_DIR="$ROOT_DIR/Telemachus.app"
 SIGNING_IDENTITY="${TELEMACHUS_SIGNING_IDENTITY:--}"
@@ -12,7 +12,7 @@ DMG_PATH="$ROOT_DIR/Telemachus-${VERSION}-${ARTIFACT_SUFFIX}.dmg"
 SKIP_DMG="${TELEMACHUS_SKIP_DMG:-0}"
 
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "VERSION must be a semantic version, got '$VERSION'." >&2
+    echo "TELEMACHUS_VERSION must be a semantic version, got '$VERSION'." >&2
     exit 1
 fi
 if [ ! -x "$BINARY" ]; then
@@ -32,9 +32,6 @@ cp "$BINARY" "$APP_DIR/Contents/MacOS/Telemachus"
 cp "$ROOT_DIR/MacHost/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/LICENSE" "$APP_DIR/Contents/Resources/Legal/LICENSE"
 cp "$ROOT_DIR/NOTICE" "$APP_DIR/Contents/Resources/Legal/NOTICE"
-cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" \
-   "$APP_DIR/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"
-cp "$ROOT_DIR/PRIVACY.md" "$APP_DIR/Contents/Resources/Legal/PRIVACY.md"
 cp "$ROOT_DIR/licenses/Apache-2.0.txt" \
    "$APP_DIR/Contents/Resources/Legal/licenses/Apache-2.0.txt"
 cp "$ROOT_DIR/MacHost/Resources/Credits.html" \

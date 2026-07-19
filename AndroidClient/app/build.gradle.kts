@@ -3,9 +3,17 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersion = rootProject.file("../VERSION").readText().trim()
+val appVersion = providers.environmentVariable("TELEMACHUS_VERSION").getOrElse("0.0.0")
 val versionParts = appVersion.split(".")
-val computedVersionCode = versionParts[0].toInt() * 10000 + versionParts[1].toInt() * 100 + versionParts[2].toInt()
+require(versionParts.size == 3 && versionParts.all { part -> part.toIntOrNull() != null }) {
+    "TELEMACHUS_VERSION must be a semantic version, got '$appVersion'."
+}
+val computedVersionCode =
+    (
+        versionParts[0].toInt() * 10000 +
+            versionParts[1].toInt() * 100 +
+            versionParts[2].toInt()
+    ).coerceAtLeast(1)
 val releaseStoreFile = providers.environmentVariable("TELEMACHUS_KEYSTORE_FILE")
 val releaseStorePassword = providers.environmentVariable("TELEMACHUS_KEYSTORE_PASSWORD")
 val releaseKeyAlias = providers.environmentVariable("TELEMACHUS_KEY_ALIAS")
@@ -81,7 +89,7 @@ android {
 
 val syncOpenSourceNotices by tasks.registering(Sync::class) {
     from(rootProject.projectDir.parentFile) {
-        include("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "licenses/Apache-2.0.txt")
+        include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt")
     }
     into(layout.buildDirectory.dir("generated/oss-notices"))
 }
