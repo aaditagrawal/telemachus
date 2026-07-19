@@ -4,15 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSION="${TELEMACHUS_VERSION:-0.0.0}"
+ARTIFACT_VERSION="${TELEMACHUS_ARTIFACT_VERSION:-$VERSION}"
 BINARY="${TELEMACHUS_BINARY:-$ROOT_DIR/MacHost/.build/release-universal/Telemachus}"
 APP_DIR="$ROOT_DIR/Telemachus.app"
 SIGNING_IDENTITY="${TELEMACHUS_SIGNING_IDENTITY:--}"
 ARTIFACT_SUFFIX="${TELEMACHUS_ARTIFACT_SUFFIX:-mac-universal-unsigned-source-build}"
-DMG_PATH="$ROOT_DIR/Telemachus-${VERSION}-${ARTIFACT_SUFFIX}.dmg"
+DMG_PATH="$ROOT_DIR/Telemachus-${ARTIFACT_VERSION}-${ARTIFACT_SUFFIX}.dmg"
 SKIP_DMG="${TELEMACHUS_SKIP_DMG:-0}"
 
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "TELEMACHUS_VERSION must be a semantic version, got '$VERSION'." >&2
+    exit 1
+fi
+if [[ ! "$ARTIFACT_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "TELEMACHUS_ARTIFACT_VERSION is not a safe release version: '$ARTIFACT_VERSION'." >&2
     exit 1
 fi
 if [ ! -x "$BINARY" ]; then

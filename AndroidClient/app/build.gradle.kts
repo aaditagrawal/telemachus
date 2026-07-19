@@ -9,11 +9,12 @@ require(versionParts.size == 3 && versionParts.all { part -> part.toIntOrNull() 
     "TELEMACHUS_VERSION must be a semantic version, got '$appVersion'."
 }
 val computedVersionCode =
-    (
-        versionParts[0].toInt() * 10000 +
-            versionParts[1].toInt() * 100 +
-            versionParts[2].toInt()
-    ).coerceAtLeast(1)
+    100_000 +
+        (
+            versionParts[0].toInt() * 10000 +
+                versionParts[1].toInt() * 100 +
+                versionParts[2].toInt()
+        )
 val releaseStoreFile = providers.environmentVariable("TELEMACHUS_KEYSTORE_FILE")
 val releaseStorePassword = providers.environmentVariable("TELEMACHUS_KEYSTORE_PASSWORD")
 val releaseKeyAlias = providers.environmentVariable("TELEMACHUS_KEY_ALIAS")

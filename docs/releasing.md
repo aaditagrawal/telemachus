@@ -1,8 +1,12 @@
 # Release Guide
 
 Releases are intentionally stricter than local development builds. A public
-release tag must be a semantic version, have a matching `CHANGELOG.md` section,
-and be pushed from a clean commit that has passed CI.
+release tag must use numeric `MAJOR.MINOR.PATCH`, optionally prefixed with `v`
+and optionally followed by a prerelease identifier. It must have a matching
+`CHANGELOG.md` section and be pushed from a clean commit that has passed CI.
+Android and macOS bundle versions use the numeric core of the tag. Android
+version codes use a `100000` Telemachus epoch so the reset version line remains
+newer than historical `0.x` builds.
 
 ## Declare repository ownership
 
@@ -91,6 +95,14 @@ and push the clean release commit. After CI passes:
 
 ```bash
 TELEMACHUS_RELEASE_CONFIRM=0.12.0 ./scripts/release.sh 0.12.0
+```
+
+Prerelease tags use the complete tag for the changelog, confirmation, release
+name, and artifact filenames:
+
+```bash
+TELEMACHUS_RELEASE_CONFIRM=v0.0.1-experimental-variable-edition \
+  ./scripts/release.sh v0.0.1-experimental-variable-edition
 ```
 
 The release workflow publishes the APK, DMG, legal notices and dependency

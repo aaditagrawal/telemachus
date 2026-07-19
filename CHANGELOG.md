@@ -10,20 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- mDNS auto-discovery for wireless mode
+- Audio streaming
+- Multi-touch gestures
+- Stylus/pen support
+
+---
+
+<a id="v0.0.1-experimental-variable-edition"></a>
+## [v0.0.1-experimental-variable-edition] - 2026-07-19
+
 ### Changed
 - Replaced the Signal Gate concept with the simpler Companion Screens outline
   icon across macOS, Android, the website, and repository artwork.
 - Added adaptive, round, and monochrome Android launcher icons.
 - Hardened release provenance, installation tooling, runtime privacy, and
   public-repository documentation.
+- Started the Android version-code epoch above the historical `0.12.0` line so
+  this reset prerelease can update existing Telemachus installs.
 - Expanded the README with the project's Codex-monitor origin story, detailed
   SideScreen technical attribution, and a foundation-versus-fork comparison.
-
-### Planned
-- mDNS auto-discovery for wireless mode
-- Audio streaming
-- Multi-touch gestures
-- Stylus/pen support
 
 ---
 
