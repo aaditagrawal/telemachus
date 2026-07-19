@@ -1,10 +1,12 @@
 # Release Guide
 
 Releases are intentionally stricter than local development builds. A public
-release tag must be a semantic version (optionally prefixed with `v` and/or
-followed by a prerelease identifier), have a matching `CHANGELOG.md` section,
-and be pushed from a clean commit that has passed CI. Android and macOS bundle
-versions use the numeric core of the tag.
+release tag must use numeric `MAJOR.MINOR.PATCH`, optionally prefixed with `v`
+and optionally followed by a prerelease identifier. It must have a matching
+`CHANGELOG.md` section and be pushed from a clean commit that has passed CI.
+Android and macOS bundle versions use the numeric core of the tag. Android
+version codes use a `100000` Telemachus epoch so the reset version line remains
+newer than historical `0.x` builds.
 
 ## Declare repository ownership
 

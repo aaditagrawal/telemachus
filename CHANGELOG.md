@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added adaptive, round, and monochrome Android launcher icons.
 - Hardened release provenance, installation tooling, runtime privacy, and
   public-repository documentation.
+- Started the Android version-code epoch above the historical `0.12.0` line so
+  this reset prerelease can update existing Telemachus installs.
 - Expanded the README with the project's Codex-monitor origin story, detailed
   SideScreen technical attribution, and a foundation-versus-fork comparison.
 
