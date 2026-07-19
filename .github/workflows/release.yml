@@ -280,7 +280,11 @@ jobs:
             echo "Refusing to publish a debug-signed release."
             exit 1
           fi
-          grep -Fq "Signer #1 certificate SHA-256 digest: $EXPECTED_CERT_SHA256" signing.txt || {
+          grep -Fq "Number of signers: 1" signing.txt || {
+            echo "Release APK must have exactly one signer."
+            exit 1
+          }
+          grep -Fq "certificate SHA-256 digest: $EXPECTED_CERT_SHA256" signing.txt || {
             echo "Release certificate does not match the established Telemachus update key."
             exit 1
           }
