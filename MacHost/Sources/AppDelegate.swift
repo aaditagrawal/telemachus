@@ -114,6 +114,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create menu bar item
         setupMenuBar()
 
+        // Honor the optional menu-bar-only preference before showing windows.
+        applyActivationPolicy()
+
         // Setup settings window
         setupSettingsWindow()
 
@@ -390,6 +393,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        settings.$hideDockIcon
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] hideDockIcon in
+                // @Published emits in willSet — pass the value through rather
+                // than rereading settings.hideDockIcon, which is still stale.
+                self?.applyActivationPolicy(hideDockIcon: hideDockIcon)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Switches between a normal Dock app and a menu-bar accessory.
+    /// Default remains `.regular` so existing workflows keep a Dock icon.
+    func applyActivationPolicy(hideDockIcon: Bool? = nil) {
+        let hide = hideDockIcon ?? settings.hideDockIcon
+        let policy: NSApplication.ActivationPolicy = hide ? .accessory : .regular
+        let applied = NSApp.setActivationPolicy(policy)
+        if !applied {
+            debugLog("Failed to set activation policy to \(hide ? "accessory" : "regular")")
+        }
     }
 
     func setupMenuBar() {
@@ -815,6 +839,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 self.screenCapture?.requestKeyframeOrReplayCachedFrame(force: true)
                 Task { @MainActor in
+                    // Clear before the new client's type-11 arrives so a
+                    // takeover never leaves the previous tablet's model/Hz up.
+                    self.settings.connectedDeviceModel = nil
+                    self.settings.connectedDeviceMaxRefreshRate = nil
                     self.settings.clientConnected = true
                 }
             }
@@ -847,6 +875,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 Task { @MainActor in
                     self.settings.clientConnected = false
+                    self.settings.connectedDeviceModel = nil
+                    self.settings.connectedDeviceMaxRefreshRate = nil
                     // Final lastConnected snapshot at the disconnect moment, then
                     // freeze (currentWirelessDevice = nil stops the rolling update
                     // in refreshStatusIndicators).
@@ -855,6 +885,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self.currentWirelessDevice = nil
                         self.settings.currentWirelessDevice = nil
                     }
+                }
+            }
+
+            streamingServer?.onDeviceInfoReceived = { [weak self] model, refreshRate in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    self.settings.connectedDeviceModel = model
+                    self.settings.connectedDeviceMaxRefreshRate = Int(refreshRate)
+                    debugLog("Device info: \(model), \(refreshRate)Hz")
                 }
             }
 
@@ -958,6 +997,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.isRunning = false
         settings.displayCreated = false
         settings.clientConnected = false
+        settings.connectedDeviceModel = nil
+        settings.connectedDeviceMaxRefreshRate = nil
         settings.currentFPS = 0
         settings.currentBitrate = 0
 

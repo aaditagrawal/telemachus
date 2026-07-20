@@ -1058,7 +1058,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 log("Connecting to $host:$port...")
 
-                streamClient = StreamClient(host, port)
+                streamClient = StreamClient(host, port, applicationContext)
                 setupStreamClientCallbacks()
                 streamClient?.connect()
             } catch (e: Exception) {

@@ -434,10 +434,22 @@ struct SettingsView: View {
                                     }
                                 }
 
-                                if settings.refreshRate >= 90 {
-                                    Text("Use only with a tablet panel that supports this rate. The connected SM-P610 is 60 Hz.")
+                                if settings.clientConnected,
+                                   let model = settings.connectedDeviceModel,
+                                   let maxHz = settings.connectedDeviceMaxRefreshRate {
+                                    if settings.refreshRate <= maxHz {
+                                        Text("\(model) supports up to \(maxHz) Hz")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.green)
+                                    } else {
+                                        Text("\(model) may not support \(settings.refreshRate) Hz (max \(maxHz) Hz)")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.orange)
+                                    }
+                                } else if settings.refreshRate >= 90 {
+                                    Text("Use only with a tablet panel that supports this refresh rate.")
                                         .font(.system(size: 10))
-                                        .foregroundColor(.green)
+                                        .foregroundColor(.secondary)
                                 }
                             }
                         }
@@ -545,6 +557,21 @@ struct SettingsView: View {
                                     }
                                     Spacer()
                                     Toggle("", isOn: $settings.autoStartStreamingOnLaunch)
+                                        .labelsHidden()
+                                }
+
+                                Divider()
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Hide Dock icon")
+                                            .font(.system(size: 12, weight: .medium))
+                                        Text("Run as a menu bar–only utility. Open Settings from the menu bar icon.")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $settings.hideDockIcon)
                                         .labelsHidden()
                                 }
 
@@ -1234,6 +1261,9 @@ class DisplaySettings: ObservableObject {
     @Published var autoStartStreamingOnLaunch: Bool {
         didSet { save("autoStartStreamingOnLaunch", autoStartStreamingOnLaunch) }
     }
+    @Published var hideDockIcon: Bool {
+        didSet { save("hideDockIcon", hideDockIcon) }
+    }
     @Published var startupMode: ConnectionMode {
         didSet { save("startupMode", startupMode.rawValue) }
     }
@@ -1250,6 +1280,10 @@ class DisplaySettings: ObservableObject {
     // Runtime state (not persisted)
     @Published var displayCreated = false
     @Published var clientConnected = false
+    /// Model string reported by the connected Android client (wire type 11).
+    @Published var connectedDeviceModel: String?
+    /// Max panel refresh rate (Hz) reported by the connected Android client.
+    @Published var connectedDeviceMaxRefreshRate: Int?
     /// Device name of the wireless client currently streaming (nil when none).
     /// WirelessSection reads this to show a "Connected" badge on the matching row.
     @Published var currentWirelessDevice: String?
@@ -1294,6 +1328,7 @@ class DisplaySettings: ObservableObject {
         let modeRaw = defaults.string(forKey: keyPrefix + "connectionMode") ?? ConnectionMode.usb.rawValue
         self.connectionMode = ConnectionMode(rawValue: modeRaw) ?? .usb
         self.autoStartStreamingOnLaunch = defaults.object(forKey: keyPrefix + "autoStartStreamingOnLaunch") as? Bool ?? true
+        self.hideDockIcon = defaults.object(forKey: keyPrefix + "hideDockIcon") as? Bool ?? false
         let startupRaw = defaults.string(forKey: keyPrefix + "startupMode") ?? modeRaw
         self.startupMode = ConnectionMode(rawValue: startupRaw) ?? .usb
         let sourceRaw = defaults.string(forKey: keyPrefix + "displaySource") ?? DisplaySourceMode.currentMain.rawValue
@@ -1452,7 +1487,7 @@ class DisplaySettings: ObservableObject {
     func resetToDefaults() {
         let keys = ["resolution", "refreshRate", "hiDPI", "bitrate", "quality",
                     "gamingBoost", "port", "rotation", "showAllResolutions",
-                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode",
+                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "hideDockIcon", "startupMode",
                     "displaySource", "adbDeviceSerial"]
         for key in keys {
             defaults.removeObject(forKey: keyPrefix + key)
@@ -1471,6 +1506,7 @@ class DisplaySettings: ObservableObject {
         customHeight = 1200
         touchEnabled = true
         autoStartStreamingOnLaunch = true
+        hideDockIcon = false
         startupMode = .usb
         displaySource = .currentMain
         adbDeviceSerial = ""
