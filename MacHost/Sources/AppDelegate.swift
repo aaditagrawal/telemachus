@@ -395,19 +395,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$hideDockIcon
             .dropFirst()
             .removeDuplicates()
-            .sink { [weak self] _ in
-                self?.applyActivationPolicy()
+            .sink { [weak self] hideDockIcon in
+                // @Published emits in willSet — pass the value through rather
+                // than rereading settings.hideDockIcon, which is still stale.
+                self?.applyActivationPolicy(hideDockIcon: hideDockIcon)
             }
             .store(in: &cancellables)
     }
 
     /// Switches between a normal Dock app and a menu-bar accessory.
     /// Default remains `.regular` so existing workflows keep a Dock icon.
-    func applyActivationPolicy() {
-        let policy: NSApplication.ActivationPolicy = settings.hideDockIcon ? .accessory : .regular
+    func applyActivationPolicy(hideDockIcon: Bool? = nil) {
+        let hide = hideDockIcon ?? settings.hideDockIcon
+        let policy: NSApplication.ActivationPolicy = hide ? .accessory : .regular
         let applied = NSApp.setActivationPolicy(policy)
         if !applied {
-            debugLog("Failed to set activation policy to \(settings.hideDockIcon ? "accessory" : "regular")")
+            debugLog("Failed to set activation policy to \(hide ? "accessory" : "regular")")
         }
     }
 
