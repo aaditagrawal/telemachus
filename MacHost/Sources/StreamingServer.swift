@@ -18,10 +18,13 @@ private enum WireMessage {
     /// message types, so this must never be sent unsolicited.
     static let codecSelected: UInt8 = 10
     /// Client→server, 66-byte message: type + 64-byte null-padded UTF-8 model
-    /// name + 1-byte max refresh rate (Hz). Requires a host that understands
-    /// this type — older hosts only consume 1 byte for unknown types and would
-    /// desync. Ship Mac + Android updates together.
+    /// name + 1-byte max refresh rate (Hz). Sent only after the host accepts
+    /// via `hostAcceptsDeviceInfo` so older Macs never see the payload.
     static let clientDeviceInfo: UInt8 = 11
+    /// Payload-free capability handshake. Client offers; host accepts only if
+    /// it understands type 11. Older hosts consume the offer as 1 unknown byte
+    /// and never reply, so the client skips the payload.
+    static let deviceInfoCapability: UInt8 = 12
 }
 
 private extension NWEndpoint {
@@ -634,6 +637,15 @@ class StreamingServer {
                     clientIsAvcOnly = true
                     debugLog("Client is AVC-only — will negotiate H.264")
                 }
+
+            case WireMessage.deviceInfoCapability:
+                // Payload-free offer from a client that can send type 11.
+                // Reply with the same type so the client knows it is safe to
+                // send the 66-byte payload. Older hosts never reach this case.
+                consumeInputBytes(1)
+                let accept = Data([WireMessage.deviceInfoCapability])
+                connection.send(content: accept, completion: .contentProcessed { _ in })
+                debugLog("Accepted device-info capability; waiting for type 11 payload")
 
             case WireMessage.clientDeviceInfo:
                 // 66 bytes: 1 type + 64 null-padded model name + 1 refresh rate.

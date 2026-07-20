@@ -813,6 +813,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 self.screenCapture?.requestKeyframeOrReplayCachedFrame(force: true)
                 Task { @MainActor in
+                    // Clear before the new client's type-11 arrives so a
+                    // takeover never leaves the previous tablet's model/Hz up.
+                    self.settings.connectedDeviceModel = nil
+                    self.settings.connectedDeviceMaxRefreshRate = nil
                     self.settings.clientConnected = true
                 }
             }

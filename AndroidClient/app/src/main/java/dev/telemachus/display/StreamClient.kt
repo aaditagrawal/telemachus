@@ -133,7 +133,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
-                sendDeviceInfo()
+                offerDeviceInfoCapability()
                 isConnected = true
                 lastKeyframeReceivedNs = 0L
                 synchronized(keyframeRequestLock) {
@@ -263,7 +263,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
-                sendDeviceInfo()
+                offerDeviceInfoCapability()
                 isConnected = true
                 diagLog("Wireless connected to $host:$port")
                 onConnectionStatus?.invoke(true)
@@ -291,10 +291,22 @@ class StreamClient(
     }
 
     /**
+     * Payload-free offer (type 12). Older Mac hosts consume one unknown byte and
+     * never reply, so we only send the 66-byte type 11 payload after the host
+     * accepts with the same type.
+     */
+    private fun offerDeviceInfoCapability() {
+        outputStream?.let { out ->
+            out.writeByte(MESSAGE_DEVICE_INFO_CAPABILITY)
+            out.flush()
+            diagLog("Offered device-info capability")
+        }
+    }
+
+    /**
      * Reports Build.MODEL and the panel's maximum supported refresh rate so the
      * Mac settings UI can stop hardcoding a developer tablet. Uses wire type 11
-     * (66 bytes). Mac hosts older than this message type will desync — keep Mac
-     * and Android releases paired.
+     * (66 bytes) only after [MESSAGE_DEVICE_INFO_CAPABILITY] acceptance.
      */
     private fun sendDeviceInfo() {
         val out = outputStream ?: return
@@ -322,16 +334,20 @@ class StreamClient(
         val appContext = context ?: return 60
         return try {
             val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
             @Suppress("DEPRECATION")
             val display = windowManager.defaultDisplay
 
             val maxFromModes =
                 display.supportedModes
-                    .maxOfOrNull { mode -> mode.refreshRate }
-                    ?.toInt()
+                    .maxOfOrNull { mode -> kotlin.math.round(mode.refreshRate).toInt() }
 
-            maxFromModes
-                ?: @Suppress("DEPRECATION") display.refreshRate.toInt()
+            if (maxFromModes != null) {
+                maxFromModes
+            } else {
+                @Suppress("DEPRECATION")
+                kotlin.math.round(display.refreshRate).toInt()
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Could not read display refresh rate, using 60", e)
             60
@@ -386,6 +402,12 @@ class StreamClient(
                             codecNegotiated = true
                             diagLog("Server selected codec: ${if (streamCodecIsHevc) "HEVC" else "H.264"}")
                             onCodecSelected?.invoke(streamCodecIsHevc)
+                        }
+
+                        MESSAGE_DEVICE_INFO_CAPABILITY -> {
+                            // Host accepted our offer — safe to send the payload.
+                            diagLog("Host accepted device-info capability")
+                            sendDeviceInfo()
                         }
 
                         else -> {
@@ -647,6 +669,7 @@ class StreamClient(
         private const val MESSAGE_CLIENT_AVC_ONLY = 9
         private const val MESSAGE_CODEC_SELECTED = 10
         private const val MESSAGE_CLIENT_DEVICE_INFO = 11
+        private const val MESSAGE_DEVICE_INFO_CAPABILITY = 12
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 
