@@ -1374,51 +1374,79 @@ class DisplaySettings: ObservableObject {
         onResetWirelessToken?() ?? false
     }
 
-    /// Compare the running CFBundleVersion to the last launch. A change means
-    /// the binary was rebuilt or re-signed — TCC entries can look granted in
-    /// System Settings while CGPreflight / AXIsProcessTrusted still fail.
+    /// Detect rebuilds / re-signs that can leave stale TCC grants. Uses a
+    /// fingerprint of CFBundleVersion plus the executable's mtime and size so
+    /// ad-hoc source builds that keep `0.0.0` still trip the hint.
     func evaluatePostUpdatePermissionHint() {
-        let currentVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
-        guard !currentVersion.isEmpty else {
+        let fingerprint = currentBinaryFingerprint()
+        guard !fingerprint.isEmpty else {
             showPostUpdatePermissionHint = false
             return
         }
 
-        let lastVersionKey = keyPrefix + "lastKnownBundleVersion"
-        let dismissedKey = keyPrefix + "dismissedPostUpdatePermissionHintVersion"
-        let pendingKey = keyPrefix + "pendingPostUpdatePermissionHintVersion"
-        let lastVersion = defaults.string(forKey: lastVersionKey) ?? ""
+        let lastKey = keyPrefix + "lastKnownBinaryFingerprint"
+        let dismissedKey = keyPrefix + "dismissedPostUpdatePermissionHintFingerprint"
+        let pendingKey = keyPrefix + "pendingPostUpdatePermissionHintFingerprint"
+        let lastFingerprint = defaults.string(forKey: lastKey) ?? ""
         let dismissedFor = defaults.string(forKey: dismissedKey) ?? ""
 
-        if !lastVersion.isEmpty, lastVersion != currentVersion {
-            // New build since last run — keep prompting across relaunches until
-            // dismissed or Screen Recording is confirmed working again.
-            defaults.set(currentVersion, forKey: pendingKey)
-            debugLog("App version changed \(lastVersion) → \(currentVersion); showing post-update permission hint")
+        if lastFingerprint.isEmpty {
+            // First launch of this tracking code. If other Telemachus settings
+            // already exist, this is an upgrade/re-sign into the fix — seed the
+            // pending hint so the recovery banner appears on this update.
+            let looksLikePriorInstall =
+                defaults.object(forKey: keyPrefix + "hasCompletedOnboarding") != nil ||
+                defaults.object(forKey: keyPrefix + "refreshRate") != nil ||
+                defaults.object(forKey: keyPrefix + "port") != nil
+            if looksLikePriorInstall {
+                defaults.set(fingerprint, forKey: pendingKey)
+                debugLog("Prior install detected without fingerprint history; seeding post-update permission hint")
+            }
+        } else if lastFingerprint != fingerprint {
+            defaults.set(fingerprint, forKey: pendingKey)
+            debugLog("App binary fingerprint changed; showing post-update permission hint")
         }
 
-        defaults.set(currentVersion, forKey: lastVersionKey)
+        defaults.set(fingerprint, forKey: lastKey)
 
         let pending = defaults.string(forKey: pendingKey) ?? ""
         showPostUpdatePermissionHint =
-            pending == currentVersion && dismissedFor != currentVersion
+            pending == fingerprint && dismissedFor != fingerprint
     }
 
     func dismissPostUpdatePermissionHint() {
-        let currentVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
-        if !currentVersion.isEmpty {
-            defaults.set(currentVersion, forKey: keyPrefix + "dismissedPostUpdatePermissionHintVersion")
-            defaults.removeObject(forKey: keyPrefix + "pendingPostUpdatePermissionHintVersion")
+        let fingerprint = currentBinaryFingerprint()
+        if !fingerprint.isEmpty {
+            defaults.set(fingerprint, forKey: keyPrefix + "dismissedPostUpdatePermissionHintFingerprint")
+            defaults.removeObject(forKey: keyPrefix + "pendingPostUpdatePermissionHintFingerprint")
         }
         showPostUpdatePermissionHint = false
     }
 
-    /// Clear the hint once Screen Recording is actually usable again.
+    /// Clear only once Screen Recording and Accessibility both look healthy,
+    /// so a still-stale Accessibility grant does not lose the recovery guidance.
+    /// Users who do not need Accessibility can dismiss manually.
     func clearPostUpdatePermissionHintIfResolved() {
         guard showPostUpdatePermissionHint else { return }
-        if hasScreenRecordingPermission {
+        if hasScreenRecordingPermission && hasAccessibilityPermission {
             dismissPostUpdatePermissionHint()
         }
+    }
+
+    /// Version alone is not enough: `scripts/package_mac.sh` defaults to
+    /// `CFBundleVersion` `0.0.0` on every local rebuild, which still re-signs
+    /// and can invalidate TCC.
+    private func currentBinaryFingerprint() -> String {
+        let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard let executableURL = Bundle.main.executableURL else {
+            return version
+        }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
+              let modified = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber else {
+            return version
+        }
+        return "\(version)|\(Int(modified.timeIntervalSince1970))|\(size.intValue)"
     }
 
     func resetToDefaults() {
