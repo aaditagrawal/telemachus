@@ -552,6 +552,21 @@ struct SettingsView: View {
 
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
+                                        Text("Hide Dock icon")
+                                            .font(.system(size: 12, weight: .medium))
+                                        Text("Run as a menu bar–only utility. Open Settings from the menu bar icon.")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $settings.hideDockIcon)
+                                        .labelsHidden()
+                                }
+
+                                Divider()
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
                                         Text("Startup mode")
                                             .font(.system(size: 12, weight: .medium))
                                         Text("Which connection mode to start in when auto-starting.")
@@ -1194,6 +1209,9 @@ class DisplaySettings: ObservableObject {
     @Published var autoStartStreamingOnLaunch: Bool {
         didSet { save("autoStartStreamingOnLaunch", autoStartStreamingOnLaunch) }
     }
+    @Published var hideDockIcon: Bool {
+        didSet { save("hideDockIcon", hideDockIcon) }
+    }
     @Published var startupMode: ConnectionMode {
         didSet { save("startupMode", startupMode.rawValue) }
     }
@@ -1250,6 +1268,7 @@ class DisplaySettings: ObservableObject {
         let modeRaw = defaults.string(forKey: keyPrefix + "connectionMode") ?? ConnectionMode.usb.rawValue
         self.connectionMode = ConnectionMode(rawValue: modeRaw) ?? .usb
         self.autoStartStreamingOnLaunch = defaults.object(forKey: keyPrefix + "autoStartStreamingOnLaunch") as? Bool ?? true
+        self.hideDockIcon = defaults.object(forKey: keyPrefix + "hideDockIcon") as? Bool ?? false
         let startupRaw = defaults.string(forKey: keyPrefix + "startupMode") ?? modeRaw
         self.startupMode = ConnectionMode(rawValue: startupRaw) ?? .usb
         let sourceRaw = defaults.string(forKey: keyPrefix + "displaySource") ?? DisplaySourceMode.currentMain.rawValue
@@ -1333,7 +1352,7 @@ class DisplaySettings: ObservableObject {
     func resetToDefaults() {
         let keys = ["resolution", "refreshRate", "hiDPI", "bitrate", "quality",
                     "gamingBoost", "port", "rotation", "showAllResolutions",
-                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode",
+                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "hideDockIcon", "startupMode",
                     "displaySource", "adbDeviceSerial"]
         for key in keys {
             defaults.removeObject(forKey: keyPrefix + key)
@@ -1352,6 +1371,7 @@ class DisplaySettings: ObservableObject {
         customHeight = 1200
         touchEnabled = true
         autoStartStreamingOnLaunch = true
+        hideDockIcon = false
         startupMode = .usb
         displaySource = .currentMain
         adbDeviceSerial = ""
