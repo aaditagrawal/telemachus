@@ -738,6 +738,46 @@ struct SettingsView: View {
                         // Status
                         FrostedGroupBox(title: "Status", icon: "checkmark.circle") {
                             VStack(alignment: .leading, spacing: 12) {
+                                if settings.showPostUpdatePermissionHint {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                                .foregroundColor(.orange)
+                                            Text("Permissions after update")
+                                                .font(.system(size: 12, weight: .medium))
+                                            Spacer()
+                                            Button("Dismiss") {
+                                                settings.dismissPostUpdatePermissionHint()
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .font(.system(size: 11))
+                                        }
+                                        Text("After a rebuild or re-sign, macOS can leave a stale Screen Recording or Accessibility entry that still looks checked but no longer works. Uncheck Telemachus in System Settings, then check it again.")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: 8) {
+                                            Button(action: {
+                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                                            }) {
+                                                Text("Screen Recording")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                            Button(action: {
+                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                                            }) {
+                                                Text("Accessibility")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color.orange.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+
                                 StatusRow(title: "Display Source",
                                           status: settings.displayCreated ? "Active" : "Inactive",
                                           color: settings.displayCreated ? .green : .secondary,
@@ -1247,6 +1287,10 @@ class DisplaySettings: ObservableObject {
     /// Device name of the wireless client currently streaming (nil when none).
     /// WirelessSection reads this to show a "Connected" badge on the matching row.
     @Published var currentWirelessDevice: String?
+    /// Shown after a build/version change until the user dismisses it or both
+    /// privacy grants look healthy again. Avoids the brittle admin `tccutil`
+    /// reset path that XProtect has flagged in related apps.
+    @Published var showPostUpdatePermissionHint = false
     @Published var hasScreenRecordingPermission = false
     @Published var hasAccessibilityPermission = false
     @Published var adbInstalled = false
@@ -1363,6 +1407,81 @@ class DisplaySettings: ObservableObject {
 
     func resetWirelessToken() -> Bool {
         onResetWirelessToken?() ?? false
+    }
+
+    /// Detect rebuilds / re-signs that can leave stale TCC grants. Uses a
+    /// fingerprint of CFBundleVersion plus the executable's mtime and size so
+    /// ad-hoc source builds that keep `0.0.0` still trip the hint.
+    func evaluatePostUpdatePermissionHint() {
+        let fingerprint = currentBinaryFingerprint()
+        guard !fingerprint.isEmpty else {
+            showPostUpdatePermissionHint = false
+            return
+        }
+
+        let lastKey = keyPrefix + "lastKnownBinaryFingerprint"
+        let dismissedKey = keyPrefix + "dismissedPostUpdatePermissionHintFingerprint"
+        let pendingKey = keyPrefix + "pendingPostUpdatePermissionHintFingerprint"
+        let lastFingerprint = defaults.string(forKey: lastKey) ?? ""
+        let dismissedFor = defaults.string(forKey: dismissedKey) ?? ""
+
+        if lastFingerprint.isEmpty {
+            // First launch of this tracking code. If other Telemachus settings
+            // already exist, this is an upgrade/re-sign into the fix — seed the
+            // pending hint so the recovery banner appears on this update.
+            let looksLikePriorInstall =
+                defaults.object(forKey: keyPrefix + "hasCompletedOnboarding") != nil ||
+                defaults.object(forKey: keyPrefix + "refreshRate") != nil ||
+                defaults.object(forKey: keyPrefix + "port") != nil
+            if looksLikePriorInstall {
+                defaults.set(fingerprint, forKey: pendingKey)
+                debugLog("Prior install detected without fingerprint history; seeding post-update permission hint")
+            }
+        } else if lastFingerprint != fingerprint {
+            defaults.set(fingerprint, forKey: pendingKey)
+            debugLog("App binary fingerprint changed; showing post-update permission hint")
+        }
+
+        defaults.set(fingerprint, forKey: lastKey)
+
+        let pending = defaults.string(forKey: pendingKey) ?? ""
+        showPostUpdatePermissionHint =
+            pending == fingerprint && dismissedFor != fingerprint
+    }
+
+    func dismissPostUpdatePermissionHint() {
+        let fingerprint = currentBinaryFingerprint()
+        if !fingerprint.isEmpty {
+            defaults.set(fingerprint, forKey: keyPrefix + "dismissedPostUpdatePermissionHintFingerprint")
+            defaults.removeObject(forKey: keyPrefix + "pendingPostUpdatePermissionHintFingerprint")
+        }
+        showPostUpdatePermissionHint = false
+    }
+
+    /// Clear only once Screen Recording and Accessibility both look healthy,
+    /// so a still-stale Accessibility grant does not lose the recovery guidance.
+    /// Users who do not need Accessibility can dismiss manually.
+    func clearPostUpdatePermissionHintIfResolved() {
+        guard showPostUpdatePermissionHint else { return }
+        if hasScreenRecordingPermission && hasAccessibilityPermission {
+            dismissPostUpdatePermissionHint()
+        }
+    }
+
+    /// Version alone is not enough: `scripts/package_mac.sh` defaults to
+    /// `CFBundleVersion` `0.0.0` on every local rebuild, which still re-signs
+    /// and can invalidate TCC.
+    private func currentBinaryFingerprint() -> String {
+        let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard let executableURL = Bundle.main.executableURL else {
+            return version
+        }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
+              let modified = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? NSNumber else {
+            return version
+        }
+        return "\(version)|\(Int(modified.timeIntervalSince1970))|\(size.intValue)"
     }
 
     func resetToDefaults() {

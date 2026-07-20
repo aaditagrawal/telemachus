@@ -109,6 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // flashes the onboarding flow for an already-authorized installation.
         settings.hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
         settings.hasAccessibilityPermission = AXIsProcessTrusted()
+        settings.evaluatePostUpdatePermissionHint()
 
         // Create menu bar item
         setupMenuBar()
@@ -201,6 +202,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasScreenRecording = CGPreflightScreenCaptureAccess()
         settings.hasScreenRecordingPermission = hasScreenRecording
         settings.hasAccessibilityPermission = AXIsProcessTrusted()
+        settings.clearPostUpdatePermissionHintIfResolved()
 
         guard hasScreenRecording, !hadScreenRecording else { return }
         debugLog("Screen Recording permission became available while app was running")
