@@ -113,6 +113,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create menu bar item
         setupMenuBar()
 
+        // Honor the optional menu-bar-only preference before showing windows.
+        applyActivationPolicy()
+
         // Setup settings window
         setupSettingsWindow()
 
@@ -388,6 +391,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        settings.$hideDockIcon
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] hideDockIcon in
+                // @Published emits in willSet — pass the value through rather
+                // than rereading settings.hideDockIcon, which is still stale.
+                self?.applyActivationPolicy(hideDockIcon: hideDockIcon)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Switches between a normal Dock app and a menu-bar accessory.
+    /// Default remains `.regular` so existing workflows keep a Dock icon.
+    func applyActivationPolicy(hideDockIcon: Bool? = nil) {
+        let hide = hideDockIcon ?? settings.hideDockIcon
+        let policy: NSApplication.ActivationPolicy = hide ? .accessory : .regular
+        let applied = NSApp.setActivationPolicy(policy)
+        if !applied {
+            debugLog("Failed to set activation policy to \(hide ? "accessory" : "regular")")
+        }
     }
 
     func setupMenuBar() {
