@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="v0.0.2-experimental-icons-fix"></a>
+## [v0.0.2-experimental-icons-fix] - 2026-07-20
+
+### Fixed
+- The macOS app icon now follows Apple's icon grid: a rounded rectangle with
+  transparent margins instead of a full-bleed square with sharp corners, and
+  the artwork is optically centered on the canvas.
+- The Android adaptive launcher icon now scales and centers its artwork inside
+  the 66 dp safe zone, so circular and squircle launcher masks no longer clip
+  the laptop and tablet edges. The Android 13+ themed monochrome icon gets the
+  same fix, and stroke weight is preserved after the rescale.
+
+---
+
 <a id="v0.0.1-experimental-variable-edition"></a>
 ## [v0.0.1-experimental-variable-edition] - 2026-07-19
 
