@@ -3,8 +3,10 @@ package dev.telemachus.display
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Process
 import android.util.Log
+import android.view.WindowManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -131,6 +133,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
+                sendDeviceInfo()
                 isConnected = true
                 lastKeyframeReceivedNs = 0L
                 synchronized(keyframeRequestLock) {
@@ -260,6 +263,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
+                sendDeviceInfo()
                 isConnected = true
                 diagLog("Wireless connected to $host:$port")
                 onConnectionStatus?.invoke(true)
@@ -283,6 +287,54 @@ class StreamClient(
             out.writeByte(MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA)
             out.flush()
             diagLog("Advertised frame metadata support")
+        }
+    }
+
+    /**
+     * Reports Build.MODEL and the panel's maximum supported refresh rate so the
+     * Mac settings UI can stop hardcoding a developer tablet. Uses wire type 11
+     * (66 bytes). Mac hosts older than this message type will desync — keep Mac
+     * and Android releases paired.
+     */
+    private fun sendDeviceInfo() {
+        val out = outputStream ?: return
+        try {
+            val model = Build.MODEL
+            val modelBytes = model.toByteArray(Charsets.UTF_8)
+            val modelField = ByteArray(64)
+            modelBytes.copyInto(modelField, 0, 0, minOf(modelBytes.size, 63))
+
+            val refreshRate = resolveMaxRefreshRateHz()
+            val buffer = ByteArray(1 + 64 + 1)
+            buffer[0] = MESSAGE_CLIENT_DEVICE_INFO.toByte()
+            System.arraycopy(modelField, 0, buffer, 1, 64)
+            buffer[65] = (refreshRate.coerceIn(0, 255) and 0xFF).toByte()
+
+            out.write(buffer)
+            out.flush()
+            diagLog("Sent device info: model=$model, maxRefreshRate=$refreshRate")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send device info", e)
+        }
+    }
+
+    private fun resolveMaxRefreshRateHz(): Int {
+        val appContext = context ?: return 60
+        return try {
+            val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            @Suppress("DEPRECATION")
+            val display = windowManager.defaultDisplay
+
+            val maxFromModes =
+                display.supportedModes
+                    .maxOfOrNull { mode -> mode.refreshRate }
+                    ?.toInt()
+
+            maxFromModes
+                ?: @Suppress("DEPRECATION") display.refreshRate.toInt()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read display refresh rate, using 60", e)
+            60
         }
     }
 
@@ -594,6 +646,7 @@ class StreamClient(
         private const val MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA = 8
         private const val MESSAGE_CLIENT_AVC_ONLY = 9
         private const val MESSAGE_CODEC_SELECTED = 10
+        private const val MESSAGE_CLIENT_DEVICE_INFO = 11
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 
