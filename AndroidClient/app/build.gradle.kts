@@ -39,6 +39,10 @@ android {
     namespace = "dev.telemachus.display"
     compileSdk = 34
 
+    // AGP reads this experimental property (values: "4k" | "16k" | "64k").
+    // The obsolete gradle.properties key android.nativeLibrary.alignment is ignored.
+    experimentalProperties["android.nativeLibraryAlignmentPageSize"] = "16k"
+
     defaultConfig {
         applicationId = "dev.telemachus.display"
         minSdk = 26
