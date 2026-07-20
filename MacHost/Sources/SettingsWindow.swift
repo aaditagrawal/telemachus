@@ -711,6 +711,46 @@ struct SettingsView: View {
                         // Status
                         FrostedGroupBox(title: "Status", icon: "checkmark.circle") {
                             VStack(alignment: .leading, spacing: 12) {
+                                if settings.showPostUpdatePermissionHint {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                                .foregroundColor(.orange)
+                                            Text("Permissions after update")
+                                                .font(.system(size: 12, weight: .medium))
+                                            Spacer()
+                                            Button("Dismiss") {
+                                                settings.dismissPostUpdatePermissionHint()
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .font(.system(size: 11))
+                                        }
+                                        Text("After a rebuild or re-sign, macOS can leave a stale Screen Recording or Accessibility entry that still looks checked but no longer works. Uncheck Telemachus in System Settings, then check it again.")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: 8) {
+                                            Button(action: {
+                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                                            }) {
+                                                Text("Screen Recording")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                            Button(action: {
+                                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                                            }) {
+                                                Text("Accessibility")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color.orange.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+
                                 StatusRow(title: "Display Source",
                                           status: settings.displayCreated ? "Active" : "Inactive",
                                           color: settings.displayCreated ? .green : .secondary,
@@ -1213,6 +1253,10 @@ class DisplaySettings: ObservableObject {
     /// Device name of the wireless client currently streaming (nil when none).
     /// WirelessSection reads this to show a "Connected" badge on the matching row.
     @Published var currentWirelessDevice: String?
+    /// Shown after a build/version change until the user dismisses it or both
+    /// privacy grants look healthy again. Avoids the brittle admin `tccutil`
+    /// reset path that XProtect has flagged in related apps.
+    @Published var showPostUpdatePermissionHint = false
     @Published var hasScreenRecordingPermission = false
     @Published var hasAccessibilityPermission = false
     @Published var adbInstalled = false
@@ -1328,6 +1372,53 @@ class DisplaySettings: ObservableObject {
 
     func resetWirelessToken() -> Bool {
         onResetWirelessToken?() ?? false
+    }
+
+    /// Compare the running CFBundleVersion to the last launch. A change means
+    /// the binary was rebuilt or re-signed — TCC entries can look granted in
+    /// System Settings while CGPreflight / AXIsProcessTrusted still fail.
+    func evaluatePostUpdatePermissionHint() {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard !currentVersion.isEmpty else {
+            showPostUpdatePermissionHint = false
+            return
+        }
+
+        let lastVersionKey = keyPrefix + "lastKnownBundleVersion"
+        let dismissedKey = keyPrefix + "dismissedPostUpdatePermissionHintVersion"
+        let pendingKey = keyPrefix + "pendingPostUpdatePermissionHintVersion"
+        let lastVersion = defaults.string(forKey: lastVersionKey) ?? ""
+        let dismissedFor = defaults.string(forKey: dismissedKey) ?? ""
+
+        if !lastVersion.isEmpty, lastVersion != currentVersion {
+            // New build since last run — keep prompting across relaunches until
+            // dismissed or Screen Recording is confirmed working again.
+            defaults.set(currentVersion, forKey: pendingKey)
+            debugLog("App version changed \(lastVersion) → \(currentVersion); showing post-update permission hint")
+        }
+
+        defaults.set(currentVersion, forKey: lastVersionKey)
+
+        let pending = defaults.string(forKey: pendingKey) ?? ""
+        showPostUpdatePermissionHint =
+            pending == currentVersion && dismissedFor != currentVersion
+    }
+
+    func dismissPostUpdatePermissionHint() {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        if !currentVersion.isEmpty {
+            defaults.set(currentVersion, forKey: keyPrefix + "dismissedPostUpdatePermissionHintVersion")
+            defaults.removeObject(forKey: keyPrefix + "pendingPostUpdatePermissionHintVersion")
+        }
+        showPostUpdatePermissionHint = false
+    }
+
+    /// Clear the hint once Screen Recording is actually usable again.
+    func clearPostUpdatePermissionHintIfResolved() {
+        guard showPostUpdatePermissionHint else { return }
+        if hasScreenRecordingPermission {
+            dismissPostUpdatePermissionHint()
+        }
     }
 
     func resetToDefaults() {
