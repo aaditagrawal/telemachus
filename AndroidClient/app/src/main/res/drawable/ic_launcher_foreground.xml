@@ -5,34 +5,51 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <path
-        android:pathData="M22,34 C19.2,34 17,36.2 17,39 L17,64 C17,66.8 19.2,69 22,69 L65,69 C67.8,69 70,66.8 70,64 L70,39 C70,36.2 67.8,34 65,34 Z"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#FAFAFA"
-        android:strokeWidth="3.4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+    <!--
+        The artwork's bounding box (including stroke) is centered at
+        (53.5, 55.5) and reaches ~44.3dp from that center. Scaling by 0.74
+        around that pivot and translating to (54, 54) keeps every point
+        inside the 33dp-radius adaptive-icon safe zone, so circular and
+        squircle launcher masks never clip the laptop or tablet edges.
+        Stroke width 4.5 renders at ~3.4dp after the group scale.
+    -->
+    <group
+        android:pivotX="53.5"
+        android:pivotY="55.5"
+        android:scaleX="0.74"
+        android:scaleY="0.74"
+        android:translateX="0.5"
+        android:translateY="-1.5">
 
-    <path
-        android:pathData="M15,71 L72,71 C72,75 69,77 65,77 L22,77 C18,77 15,75 15,71 Z"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#FAFAFA"
-        android:strokeWidth="3.4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        <path
+            android:pathData="M22,34 C19.2,34 17,36.2 17,39 L17,64 C17,66.8 19.2,69 22,69 L65,69 C67.8,69 70,66.8 70,64 L70,39 C70,36.2 67.8,34 65,34 Z"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FAFAFA"
+            android:strokeWidth="4.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
 
-    <path
-        android:pathData="M77,40 C74.8,40 73,41.8 73,44 L73,66 C73,68.2 74.8,70 77,70 L88,70 C90.2,70 92,68.2 92,66 L92,44 C92,41.8 90.2,40 88,40 Z"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#FAFAFA"
-        android:strokeWidth="3.4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        <path
+            android:pathData="M15,71 L72,71 C72,75 69,77 65,77 L22,77 C18,77 15,75 15,71 Z"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FAFAFA"
+            android:strokeWidth="4.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
 
-    <path
-        android:pathData="M70,54.5 L73,54.5"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#65D992"
-        android:strokeWidth="3.4"
-        android:strokeLineCap="round" />
+        <path
+            android:pathData="M77,40 C74.8,40 73,41.8 73,44 L73,66 C73,68.2 74.8,70 77,70 L88,70 C90.2,70 92,68.2 92,66 L92,44 C92,41.8 90.2,40 88,40 Z"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FAFAFA"
+            android:strokeWidth="4.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+
+        <path
+            android:pathData="M70,54.5 L73,54.5"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#65D992"
+            android:strokeWidth="4.5"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

@@ -18,70 +18,70 @@
       "height" : 16,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_16x16.png",
       "role" : "macOS AppIcon",
-      "sha256" : "d665fa7d516317699be7883aa09b0ab0009ec4fd129187f25be718847b177a6c",
+      "sha256" : "25eaee1375ea784855b694e1ab8725e3998de16a755482f73ea4076d850b1b89",
       "width" : 16
     },
     {
       "height" : 32,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_16x16@2x.png",
       "role" : "macOS AppIcon",
-      "sha256" : "3a5ec148f7e35cf4a12efd9780c51b504eeb455b1473865498379b356bc2b6f9",
+      "sha256" : "ef91b2e98e2b73d4e108dc8208fce2a543ab8cb9e843bd350d7c21a6348927db",
       "width" : 32
     },
     {
       "height" : 32,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_32x32.png",
       "role" : "macOS AppIcon",
-      "sha256" : "3a5ec148f7e35cf4a12efd9780c51b504eeb455b1473865498379b356bc2b6f9",
+      "sha256" : "ef91b2e98e2b73d4e108dc8208fce2a543ab8cb9e843bd350d7c21a6348927db",
       "width" : 32
     },
     {
       "height" : 64,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_32x32@2x.png",
       "role" : "macOS AppIcon",
-      "sha256" : "1385f8bf75ef6ac68910e44700e3830e9668bb5ae958638eccd2bec6d6b82b52",
+      "sha256" : "f7d87f33420153e60ca5acc08c3d032c4ba4e87761242c9f3588acb307d46b9b",
       "width" : 64
     },
     {
       "height" : 128,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_128x128.png",
       "role" : "macOS AppIcon",
-      "sha256" : "5e350cf80df24a2dd618eac8668e14d13977b558649159ea0d9498f1aec550be",
+      "sha256" : "d62ab4f4f5d52ebfbcc5b345e01da846802abe67a503920b56017b8f846d0733",
       "width" : 128
     },
     {
       "height" : 256,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_128x128@2x.png",
       "role" : "macOS AppIcon",
-      "sha256" : "c881349a34ebc6f7271a8bcc65261feb1efd5b0d9d081ee33ca2dad2b5c546fc",
+      "sha256" : "2757d8b518163171756a2a1da652d2b0f3e2713b12d17af3973da8e79bfd3878",
       "width" : 256
     },
     {
       "height" : 256,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_256x256.png",
       "role" : "macOS AppIcon",
-      "sha256" : "c881349a34ebc6f7271a8bcc65261feb1efd5b0d9d081ee33ca2dad2b5c546fc",
+      "sha256" : "2757d8b518163171756a2a1da652d2b0f3e2713b12d17af3973da8e79bfd3878",
       "width" : 256
     },
     {
       "height" : 512,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_256x256@2x.png",
       "role" : "macOS AppIcon",
-      "sha256" : "03af35fa45a93aaf789ddd7cc548f5ca1be2a86da5feabea90a9cec00d9f8aac",
+      "sha256" : "d05ede50384e6ae72776b6337cdbaf1a5cb06fd4f9d99d506f260f203ad5f14e",
       "width" : 512
     },
     {
       "height" : 512,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_512x512.png",
       "role" : "macOS AppIcon",
-      "sha256" : "03af35fa45a93aaf789ddd7cc548f5ca1be2a86da5feabea90a9cec00d9f8aac",
+      "sha256" : "d05ede50384e6ae72776b6337cdbaf1a5cb06fd4f9d99d506f260f203ad5f14e",
       "width" : 512
     },
     {
       "height" : 1024,
       "path" : "MacHost/Resources/AppIcon.iconset/icon_512x512@2x.png",
       "role" : "macOS AppIcon",
-      "sha256" : "bfb6f5c912afd5d16c2892d80b84c6aa504abc584024d2ab95a7316456e9be07",
+      "sha256" : "af2453ee9cd23e723e307e0ae2cb04c557f19a984ba7f98add84f1d4edbac060",
       "width" : 1024
     }
   ],
@@ -103,7 +103,7 @@
     {
       "path" : "MacHost/Resources/AppIcon.icns",
       "role" : "macOS packaged icon",
-      "sha256" : "a9e09406787cf1047eea07ffc0b6ba0bc4883e07a442155c7e2c141bee5be86d"
+      "sha256" : "7f049ad1145e7df893819eb07977a5b45ceb7d95240ae47f2e99603607945ebf"
     }
   ]
 }
