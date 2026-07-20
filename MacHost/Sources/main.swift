@@ -36,7 +36,7 @@ app.mainMenu = mainMenu
 
 let delegate = AppDelegate()
 
-app.setActivationPolicy(.regular)
+app.setActivationPolicy(.accessory)
 
 app.delegate = delegate
 app.run()

@@ -17,6 +17,8 @@ private enum WireMessage {
     /// clients that sent clientAvcOnly — old clients disconnect on unknown
     /// message types, so this must never be sent unsolicited.
     static let codecSelected: UInt8 = 10
+    /// Client→server, 66-byte payload: 64-byte null-padded model name + 1-byte refresh rate.
+    static let clientDeviceInfo: UInt8 = 11
 }
 
 private extension NWEndpoint {
@@ -76,6 +78,7 @@ class StreamingServer {
 
     var onWirelessClientPaired: ((String) -> Void)?
     var onServerFailed: ((Error) -> Void)?
+    var onDeviceInfoReceived: ((String, UInt8) -> Void)?
 
     private let frameQueue = DispatchQueue(label: "frameQueue", qos: .userInteractive)
     private let receiveQueue = DispatchQueue(label: "receiveQueue", qos: .userInteractive)
@@ -627,6 +630,16 @@ class StreamingServer {
                     clientIsAvcOnly = true
                     debugLog("Client is AVC-only — will negotiate H.264")
                 }
+
+            case WireMessage.clientDeviceInfo:
+                // 66 bytes: 1 type + 64 null-padded model name + 1 refresh rate.
+                guard inputBuffer.count >= 66 else { return }
+                let modelData = Data(inputBuffer.dropFirst().prefix(64))
+                let model = String(data: modelData.prefix(while: { $0 != 0 }), encoding: .utf8) ?? "Unknown"
+                let refreshRate = inputByte(at: 65)
+                consumeInputBytes(66)
+                debugLog("Received device info: model=\(model), refreshRate=\(refreshRate)Hz")
+                onDeviceInfoReceived?(model, refreshRate)
 
             default:
                 debugLog("Unknown client input type: \(msgType)")

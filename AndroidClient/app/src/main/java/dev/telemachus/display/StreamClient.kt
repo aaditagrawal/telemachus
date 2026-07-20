@@ -1,6 +1,7 @@
 package dev.telemachus.display
 
 import android.content.Context
+import android.os.Build
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Process
@@ -30,6 +31,8 @@ class StreamClient(
     private var outputStream: java.io.DataOutputStream? = null
 
     @Volatile private var isConnected = false
+
+    var onDeviceInfo: ((String, Int) -> Unit)? = null
 
     // Callback includes actual frame size (may differ from buffer.size due to pooling),
     // receive timestamp, and whether the frame can restart HEVC decoding.
@@ -131,6 +134,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
+                sendDeviceInfo()
                 isConnected = true
                 lastKeyframeReceivedNs = 0L
                 synchronized(keyframeRequestLock) {
@@ -260,6 +264,7 @@ class StreamClient(
                 codecNegotiated = false
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
+                sendDeviceInfo()
                 isConnected = true
                 diagLog("Wireless connected to $host:$port")
                 onConnectionStatus?.invoke(true)
@@ -275,6 +280,47 @@ class StreamClient(
                 cleanupCandidateSocket(s)
                 throw WirelessConnectError.ProtocolError
             }
+        }
+    }
+
+    private fun sendDeviceInfo() {
+        try {
+            outputStream?.let { out ->
+                val model = Build.MODEL
+                val modelBytes = model.toByteArray(Charsets.UTF_8)
+                val modelField = ByteArray(64) { 0 }
+                modelBytes.copyInto(modelField, 0, 0, minOf(modelBytes.size, 63))
+
+                val refreshRate: Int =
+                    if (context != null) {
+                        try {
+                            val wm = context!!.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                            val display = wm.defaultDisplay
+                            if (Build.VERSION.SDK_INT >= 30) {
+                                display.mode.refreshRate.toInt()
+                            } else {
+                                @Suppress("DEPRECATION")
+                                display.refreshRate.toInt()
+                            }
+                        } catch (_: Exception) {
+                            Log.w(TAG, "Could not read display refresh rate, using 60")
+                            60
+                        }
+                    } else {
+                        60
+                    }
+
+                val buffer = ByteArray(1 + 64 + 1)
+                buffer[0] = MESSAGE_CLIENT_DEVICE_INFO.toByte()
+                System.arraycopy(modelField, 0, buffer, 1, 64)
+                buffer[65] = (refreshRate and 0xFF).toByte()
+
+                out.write(buffer)
+                out.flush()
+                diagLog("Sent device info: model=$model, refreshRate=$refreshRate")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send device info", e)
         }
     }
 
@@ -594,6 +640,7 @@ class StreamClient(
         private const val MESSAGE_CLIENT_SUPPORTS_FRAME_METADATA = 8
         private const val MESSAGE_CLIENT_AVC_ONLY = 9
         private const val MESSAGE_CODEC_SELECTED = 10
+        private const val MESSAGE_CLIENT_DEVICE_INFO = 11
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 

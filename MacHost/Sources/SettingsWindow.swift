@@ -434,8 +434,18 @@ struct SettingsView: View {
                                     }
                                 }
 
-                                if settings.refreshRate >= 90 {
-                                    Text("Use only with a tablet panel that supports this rate. The connected SM-P610 is 60 Hz.")
+                                if settings.clientConnected, let model = settings.connectedDeviceModel, let maxHz = settings.connectedDeviceMaxRefreshRate {
+                                    if settings.refreshRate <= maxHz {
+                                        Text("\(model) supports up to \(maxHz) Hz")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.green)
+                                    } else {
+                                        Text("\(model) may not support \(settings.refreshRate) Hz (max \(maxHz) Hz)")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.orange)
+                                    }
+                                } else if settings.refreshRate >= 90 {
+                                    Text("Use only with a tablet panel that supports this refresh rate.")
                                         .font(.system(size: 10))
                                         .foregroundColor(.green)
                                 }
@@ -1210,6 +1220,8 @@ class DisplaySettings: ObservableObject {
     // Runtime state (not persisted)
     @Published var displayCreated = false
     @Published var clientConnected = false
+    @Published var connectedDeviceModel: String?
+    @Published var connectedDeviceMaxRefreshRate: Int?
     /// Device name of the wireless client currently streaming (nil when none).
     /// WirelessSection reads this to show a "Connected" badge on the matching row.
     @Published var currentWirelessDevice: String?

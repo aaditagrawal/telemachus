@@ -845,6 +845,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 Task { @MainActor in
                     self.settings.clientConnected = false
+                    self.settings.connectedDeviceModel = nil
+                    self.settings.connectedDeviceMaxRefreshRate = nil
                     // Final lastConnected snapshot at the disconnect moment, then
                     // freeze (currentWirelessDevice = nil stops the rolling update
                     // in refreshStatusIndicators).
@@ -865,6 +867,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     captured?.settings.currentFPS = fps
                     captured?.settings.currentBitrate = mbps
+                }
+            }
+
+            streamingServer?.onDeviceInfoReceived = { [weak self] model, refreshRate in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    self.settings.connectedDeviceModel = model
+                    self.settings.connectedDeviceMaxRefreshRate = Int(refreshRate)
+                    debugLog("Device info: \(model), \(refreshRate)Hz")
                 }
             }
 
