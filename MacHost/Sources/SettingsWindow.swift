@@ -752,7 +752,7 @@ struct SettingsView: View {
                                             .buttonStyle(.borderless)
                                             .font(.system(size: 11))
                                         }
-                                        Text("After a rebuild or re-sign, macOS can leave a stale Screen Recording or Accessibility entry that still looks checked but no longer works. Uncheck Telemachus in System Settings, then check it again.")
+                                        Text("After a rebuild or re-sign, macOS can leave a stale Screen Recording or Accessibility entry that still looks checked but no longer works. Remove Telemachus with the − button, then add it again with + (or relaunch so macOS re-prompts). Uncheck → check alone often keeps the old grant.")
                                             .font(.system(size: 11))
                                             .foregroundColor(.secondary)
                                             .fixedSize(horizontal: false, vertical: true)
