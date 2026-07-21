@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="v0.0.4-experimental-16kb-tcc"></a>
+## [v0.0.4-experimental-16kb-tcc] - 2026-07-21
+
+### Fixed
+- Bump Android CameraX from 1.3.1 to 1.4.2 so
+  `libimage_processing_util_jni.so` ships with 16 KB ELF LOAD alignment.
+  AGP zip alignment alone could not clear the Android 15+
+  “LOAD segment not aligned” warning for that prebuilt library.
+- After a rebuild or re-sign, the permissions recovery banner now tells
+  users to remove Telemachus with `−` and re-add with `+` (or relaunch
+  for a fresh prompt). Uncheck → check often keeps the stale TCC grant.
+
+---
+
 <a id="v0.0.3-experimental-settings-fixes"></a>
 ## [v0.0.3-experimental-settings-fixes] - 2026-07-21
 
