@@ -18,6 +18,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="v0.0.3-experimental-settings-fixes"></a>
+## [v0.0.3-experimental-settings-fixes] - 2026-07-21
+
+### Added
+- Optional **Hide Dock icon** preference so the Mac host can run as a menu
+  bar–only utility while keeping the Dock icon as the default.
+- After a rebuild or re-sign, the Status panel can show a permissions recovery
+  banner with System Settings deep links for Screen Recording and Accessibility
+  (no admin `tccutil` reset).
+- Android packaging sets AGP `android.nativeLibraryAlignmentPageSize` to `16k`
+  for 16 KB page-size devices.
+
+### Fixed
+- The refresh-rate compatibility message no longer hardcodes the developer
+  SM-P610 tablet. Connected Android clients report model and max panel Hz
+  (capability-negotiated wire types 12 → 11), and Settings shows live green or
+  orange guidance.
+- Fractional panel modes such as 59.94 Hz / 119.88 Hz are rounded before the
+  Mac compares them to the picker values.
+- Stale connected-device info is cleared when a new client is admitted, not only
+  on disconnect.
+
+---
+
 <a id="v0.0.2-experimental-icons-fix"></a>
 ## [v0.0.2-experimental-icons-fix] - 2026-07-20
 
