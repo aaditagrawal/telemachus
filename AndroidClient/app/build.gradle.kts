@@ -190,14 +190,16 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 
     // Wireless mode (0.8.0)
+    // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
+    // 1.3.x triggers Android 15+ "LOAD segment not aligned" warnings.
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-core:1.3.1")
+    implementation("androidx.camera:camera-core:1.4.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-camera2:1.3.1")
+    implementation("androidx.camera:camera-camera2:1.4.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-view:1.3.1")
+    implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
