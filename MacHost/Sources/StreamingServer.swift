@@ -25,6 +25,9 @@ private enum WireMessage {
     /// it understands type 11. Older hosts consume the offer as 1 unknown byte
     /// and never reply, so the client skips the payload.
     static let deviceInfoCapability: UInt8 = 12
+    /// Server→client, payload-free: server shutting down intentionally.
+    /// Client should close without attempting reconnect.
+    static let serverShutdown: UInt8 = 3
 }
 
 private extension NWEndpoint {
@@ -886,6 +889,16 @@ class StreamingServer {
             pendingFrame = nil
         }
         receiveQueue.sync {}
+
+        // Send graceful shutdown notification before closing the TCP connection
+        if let conn = connection, connectionReady {
+            let shutdownMsg = Data([WireMessage.serverShutdown])
+            let semaphore = DispatchSemaphore(value: 0)
+            conn.send(content: shutdownMsg, completion: .contentProcessed { _ in
+                semaphore.signal()
+            })
+            _ = semaphore.wait(timeout: .now() + .milliseconds(100))
+        }
 
         connection?.cancel()
         listener?.cancel()
