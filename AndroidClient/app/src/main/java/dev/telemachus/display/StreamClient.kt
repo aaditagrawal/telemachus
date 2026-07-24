@@ -677,6 +677,7 @@ class StreamClient(
         private const val MESSAGE_CODEC_SELECTED = 10
         private const val MESSAGE_CLIENT_DEVICE_INFO = 11
         private const val MESSAGE_DEVICE_INFO_CAPABILITY = 12
+
         // Type 3 (gap between touch=2 and ping=4). Not 12 — that is device-info capability.
         private const val MESSAGE_SERVER_SHUTDOWN = 3
         private const val FRAME_FLAG_KEYFRAME = 1
