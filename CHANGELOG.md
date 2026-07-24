@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="v0.0.5-experimental-graceful-shutdown"></a>
+## [v0.0.5-experimental-graceful-shutdown] - 2026-07-24
+
+### Added
+- When the Mac host stops intentionally, it sends a one-byte wire shutdown
+  message (type 3) before closing TCP. The Android client exits cleanly
+  instead of looping on “Looking for your Mac…”. Crash or kill paths still
+  reconnect as before. Contributed by @VariableThe (#19 / #20, closes #18).
+
+---
+
 <a id="v0.0.4-experimental-16kb-tcc"></a>
 ## [v0.0.4-experimental-16kb-tcc] - 2026-07-21
 
