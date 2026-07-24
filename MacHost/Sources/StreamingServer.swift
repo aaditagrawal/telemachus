@@ -27,6 +27,8 @@ private enum WireMessage {
     static let deviceInfoCapability: UInt8 = 12
     /// Server→client, payload-free: server shutting down intentionally.
     /// Client should close without attempting reconnect.
+    /// Uses the free slot 3 (between touch=2 and ping=4). Do not use 12 —
+    /// that is `deviceInfoCapability` and would trigger device-info send.
     static let serverShutdown: UInt8 = 3
 }
 
@@ -890,14 +892,17 @@ class StreamingServer {
         }
         receiveQueue.sync {}
 
-        // Send graceful shutdown notification before closing the TCP connection
+        // Notify the client before aborting TCP. `cancel()` is forceful and can
+        // RST unacked bytes, so wait for contentProcessed (up to 500ms) and then
+        // settle briefly so the peer can read type 3 before the socket dies.
         if let conn = connection, connectionReady {
             let shutdownMsg = Data([WireMessage.serverShutdown])
             let semaphore = DispatchSemaphore(value: 0)
             conn.send(content: shutdownMsg, completion: .contentProcessed { _ in
                 semaphore.signal()
             })
-            _ = semaphore.wait(timeout: .now() + .milliseconds(100))
+            _ = semaphore.wait(timeout: .now() + .milliseconds(500))
+            Thread.sleep(forTimeInterval: 0.05)
         }
 
         connection?.cancel()
