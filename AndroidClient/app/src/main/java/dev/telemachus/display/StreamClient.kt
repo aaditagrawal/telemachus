@@ -42,6 +42,7 @@ class StreamClient(
 
     /** Invoked when the server confirms the stream codec (true = HEVC). */
     var onCodecSelected: ((Boolean) -> Unit)? = null
+    var onServerShutdown: (() -> Unit)? = null
 
     /** Stream codec for sync-frame parsing. HEVC unless the server says otherwise. */
     @Volatile var streamCodecIsHevc = true
@@ -410,6 +411,12 @@ class StreamClient(
                             sendDeviceInfo()
                         }
 
+                        MESSAGE_SERVER_SHUTDOWN -> {
+                            diagLog("Server shut down gracefully — closing")
+                            onServerShutdown?.invoke()
+                            break
+                        }
+
                         else -> {
                             Log.e(
                                 TAG,
@@ -670,6 +677,9 @@ class StreamClient(
         private const val MESSAGE_CODEC_SELECTED = 10
         private const val MESSAGE_CLIENT_DEVICE_INFO = 11
         private const val MESSAGE_DEVICE_INFO_CAPABILITY = 12
+
+        // Type 3 (gap between touch=2 and ping=4). Not 12 — that is device-info capability.
+        private const val MESSAGE_SERVER_SHUTDOWN = 3
         private const val FRAME_FLAG_KEYFRAME = 1
         private const val KEYFRAME_REQUEST_FLAG_FORCE = 1
 

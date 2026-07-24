@@ -976,6 +976,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        streamClient?.onServerShutdown = {
+            runOnUiThread {
+                automaticUsbConnect = false
+                autoConnectHandler.removeCallbacks(autoConnectRunnable)
+                log("📴 Server initiated shutdown — closing app")
+                finishAffinity()
+            }
+        }
+
         streamClient?.onDisplaySize = { width, height, rotation ->
             mainDiag("onDisplaySize: ${width}x$height @ $rotation°")
             warnIfAvcOnlyWithoutNegotiation()
