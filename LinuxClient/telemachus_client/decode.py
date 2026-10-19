@@ -6,7 +6,7 @@ stdout.
 
 Pipeline (low latency, NV12 preferred)::
 
-    ffmpeg -probesize 32 -analyzeduration 0 -fflags nobuffer+flush_packets
+    ffmpeg -probesize 32 -analyzeduration 0 -fflags +flush_packets
            -flags low_delay [-hwaccel ...] -f hevc|h264 -i pipe:0
            -vf <scale/download chain> -f rawvideo -pix_fmt nv12 pipe:1
 
@@ -156,7 +156,7 @@ def build_ffmpeg_cmd(
     argv: list[str] = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
         "-probesize", "32", "-analyzeduration", "0",
-        "-fflags", "nobuffer+flush_packets", "-flags", "low_delay",
+        "-fflags", "+flush_packets", "-flags", "low_delay",
     ]
     argv += hw_pre
     argv += ["-f", codec_flag, "-i", "pipe:0"]

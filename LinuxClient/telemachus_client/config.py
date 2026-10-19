@@ -16,6 +16,10 @@ Precedence is CLI > file > defaults. CLI parsers must use ``default=None``
 for every overridable option so "unset" is distinguishable from an explicit
 value (in particular, boolean flags must default to ``None``, not
 ``False``, or they would silently override the file).
+
+:func:`save_config` is the write side of that file (pairing persistence): it
+merges into whatever the file already holds, writes atomically, and keeps the
+file mode at ``0600`` because it carries the bearer token.
 """
 
 from __future__ import annotations
@@ -23,15 +27,32 @@ from __future__ import annotations
 import base64
 import binascii
 import configparser
+import logging
+import os
 import re
 import socket
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Union
 
 from .protocol import DEFAULT_PORT
 
+log = logging.getLogger("telemachus.client.config")
+
 CONFIG_PATH = Path.home() / ".config" / "telemachus" / "client.conf"
+
+#: Keys written to the file, in a stable order (diff-friendly).
+CONFIG_KEYS: tuple[str, ...] = (
+    "host",
+    "port",
+    "token",
+    "name",
+    "decoder",
+    "display",
+    "fullscreen",
+    "input_enabled",
+)
 
 _TOKEN_B64URL_RE = re.compile(r"^[A-Za-z0-9\-_]+$")
 
@@ -223,3 +244,143 @@ def build_config(cli_args: Any, file_cfg: Mapping[str, Any]) -> ClientConfig:
         fullscreen=fullscreen,
         input_enabled=input_enabled,
     )
+
+
+def _is_unset(value: Any) -> bool:
+    """True for "remove this key": ``None``, an empty/blank string, or b""."""
+    if value is None:
+        return True
+    if isinstance(value, bytes):
+        return len(value) == 0
+    return str(value).strip() == ""
+
+
+def _token_to_b64url(value: Any) -> str:
+    """Serialize a token for the file; validate it exactly like the reader.
+
+    Accepts the raw 32 bytes used on the wire or an already-base64url string.
+    """
+    if isinstance(value, bytes):
+        if len(value) != 32:
+            raise ValueError(f"token must be 32 bytes, got {len(value)}")
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+    text = str(value).strip()
+    format_token(text)  # raises ValueError unless it decodes to 32 bytes
+    return text
+
+
+def _serialize_values(values: Mapping[str, Any]) -> Dict[str, str]:
+    """Coerce config values to their INI text form, in :data:`CONFIG_KEYS` order.
+
+    Unset values (see :func:`_is_unset`) are omitted so callers can clear a key
+    by passing ``None``/``""``. Raises :class:`ValueError` on a malformed token,
+    port, or boolean.
+    """
+    out: Dict[str, str] = {}
+    for key in CONFIG_KEYS:
+        if key not in values or _is_unset(values[key]):
+            continue
+        value = values[key]
+        if key == "port":
+            try:
+                port = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid port: {exc}") from None
+            if not 1 <= port <= 65535:
+                raise ValueError(f"port must be 1..65535, got {port}")
+            out[key] = str(port)
+        elif key == "token":
+            out[key] = _token_to_b64url(value)
+        elif key in ("fullscreen", "input_enabled"):
+            out[key] = "true" if _parse_bool(value) else "false"
+        else:
+            out[key] = str(value).strip()
+    return out
+
+
+def save_config(values: Mapping[str, Any], path: Union[Path, str, None] = None) -> Path:
+    """Persist ``values`` to the INI file (merge), returning the path written.
+
+    Existing keys the caller did not mention are preserved, so a pairing save
+    that carries only host/port/token/name does not drop a hand-set decoder or
+    display. A key mapped to ``None`` or ``""`` is *removed* (that is how
+    :func:`delete_token` clears the token). ``token`` accepts raw 32 bytes or a
+    base64url string; ``port``, ``fullscreen``, and ``input_enabled`` are
+    validated before anything is written, so a rejected value leaves the file
+    untouched.
+
+    The write is atomic: the parent directory is created, a temp file in the
+    same directory is written and fsynced, then ``os.replace`` swaps it in, so
+    a crash can never leave a truncated config behind. The file is mode
+    ``0600`` (it carries the bearer token).
+    """
+    cfg_path = Path(path) if path is not None else CONFIG_PATH
+    unknown = [key for key in values if key not in CONFIG_KEYS]
+    if unknown:
+        # A typo must not look like a successful save: the user would pair,
+        # see nothing wrong, and get a client with no host next run.
+        raise ValueError(f"unknown config key(s): {', '.join(sorted(unknown))}")
+    try:
+        merged: Dict[str, Any] = dict(load_config(cfg_path))
+    except ValueError as exc:
+        # A corrupt file is unusable as a base; the caller's explicit values
+        # are still worth persisting. Say so instead of failing the pairing.
+        log.warning("ignoring unreadable config %s: %s", cfg_path, exc)
+        merged = {}
+    for key in CONFIG_KEYS:
+        if key not in values:
+            continue
+        if _is_unset(values[key]):
+            merged.pop(key, None)
+        else:
+            merged[key] = values[key]
+
+    serialized = _serialize_values(merged)
+    lines = ["[client]"]
+    lines.extend(f"{key} = {serialized[key]}" for key in CONFIG_KEYS if key in serialized)
+    text = "\n".join(lines) + "\n"
+
+    try:
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"cannot create {cfg_path.parent}: {exc}") from None
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{cfg_path.name}.", suffix=".tmp", dir=str(cfg_path.parent)
+    )
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, cfg_path)
+    except OSError as exc:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise ValueError(f"cannot write config {cfg_path}: {exc}") from None
+    return cfg_path
+
+
+def delete_token(path: Union[Path, str, None] = None) -> bool:
+    """Remove the saved token; return whether one was there.
+
+    Other settings survive. The file itself is deleted when the token was its
+    only content (an empty config is the same as no config), otherwise it is
+    rewritten through :func:`save_config` so permissions stay ``0600``.
+    """
+    cfg_path = Path(path) if path is not None else CONFIG_PATH
+    existing = load_config(cfg_path)
+    if "token" not in existing:
+        return False
+    if len(existing) == 1:
+        try:
+            cfg_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ValueError(f"cannot remove config {cfg_path}: {exc}") from None
+        return True
+    save_config({"token": None}, path=cfg_path)
+    return True

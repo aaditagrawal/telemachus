@@ -380,6 +380,12 @@ class StreamClient:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+        self._sock = None
+        self._connected = False
 
     # -- supervision ----------------------------------------------------
 

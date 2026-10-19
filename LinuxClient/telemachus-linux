@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Telemachus Linux client launcher.
 set -euo pipefail
-cd "$(dirname "$0")"
+# Resolve symlinks: scripts/install-linux.sh links this into ~/.local/bin, and
+# `$0` would otherwise point at the link, breaking the package import below.
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+cd "$here"
 exec python3 -m telemachus_client "$@"

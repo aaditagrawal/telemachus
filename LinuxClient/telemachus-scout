@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Telemachus Linux scout launcher: pick a Tailscale host in a tkinter window.
+set -euo pipefail
+# Resolve symlinks: scripts/install-linux.sh links this into ~/.local/bin, and
+# `$0` would otherwise point at the link, breaking the package import below.
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+cd "$here"
+exec python3 -m telemachus_client.scout

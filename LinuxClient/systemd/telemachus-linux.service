@@ -5,10 +5,17 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/Projects/Telemachus/LinuxClient/telemachus-linux
+ExecStart=%h/.local/bin/telemachus-linux
 Restart=on-failure
 RestartSec=3
+# The unit can start outside a graphical login session (ssh, autostart),
+# where these are not inherited. Adjust WAYLAND_DISPLAY if the compositor
+# names its socket differently (GNOME/Wayland uses wayland-0).
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=%t
 Environment=SDL_VIDEODRIVER=wayland
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=DISPLAY=:0
 
 [Install]
 WantedBy=default.target

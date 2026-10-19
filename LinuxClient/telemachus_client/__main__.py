@@ -17,6 +17,8 @@ import atexit
 import base64
 import logging
 import os
+import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -26,6 +28,7 @@ log = logging.getLogger("telemachus.client")
 
 DEFAULT_PORT: int = 54321
 DEFAULT_NAME: str = "linux-client"
+PAIRING_EXECUTABLE: str = "./telemachus-linux"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -58,6 +61,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="do not forward mouse as touch")
     p.add_argument("--hud", action="store_true",
                    help="show fps / Mbps / RTT overlay (toggle at runtime with F1)")
+    p.add_argument("--discover-tailscale", action="store_true",
+                   help="list online Tailscale peers with the Telemachus port open "
+                        "and prompt for one (requires the tailscale CLI)")
+    p.add_argument("--scout", action="store_true",
+                   help="open the tkinter Tailscale scout to pick a host and launch "
+                        "the client (requires python3-tk)")
     p.add_argument("--selftest", action="store_true",
                    help="serve mockserver.MockTelemachusServer on loopback and point "
                         "the client at it (no Mac needed)")
@@ -141,7 +150,8 @@ def resolve_config(args: argparse.Namespace) -> ResolvedConfig:
         host = host or q_host
         port = port if port is not None else q_port
         token = token if token is not None else q_token
-        name = name or q_name
+        # Note: do NOT adopt the QR's name (q_name) as this client's device
+        # name; the client's name is --name if given, else the local hostname.
 
     # --fullscreen defaults True (and --no-input defaults False), so argparse
     # cannot tell "unset" from explicit; preserve the historical rule that an
@@ -185,6 +195,33 @@ def resolve_config(args: argparse.Namespace) -> ResolvedConfig:
     )
 
 
+def _persist_pairing(cfg: ResolvedConfig) -> None:
+    """Save a ``--qr`` pairing so later runs need no URI.
+
+    Only the connection facts are written (host/port/token/name); any decoder,
+    display, or input setting already in the file is left alone. A write
+    failure is logged, never fatal: the client already holds everything it
+    needs in memory for this run.
+    """
+    try:
+        from telemachus_client.config import save_config  # noqa: PLC0415
+    except ImportError:
+        return
+    try:
+        path = save_config(
+            {
+                "host": cfg.host,
+                "port": cfg.port,
+                "token": cfg.token,
+                "name": cfg.name,
+            }
+        )
+    except (OSError, ValueError) as exc:
+        log.warning("could not save the pairing to the config file: %s", exc)
+        return
+    log.info("pairing saved to %s (later runs need no --qr)", path)
+
+
 def _cli_flag_set(_flag: str, _args: argparse.Namespace) -> bool:
     """Best-effort 'was this flag passed' check (no sys.argv scan needed).
 
@@ -193,6 +230,127 @@ def _cli_flag_set(_flag: str, _args: argparse.Namespace) -> bool:
     file when it carries a value. Returns False here to keep that simple.
     """
     return False
+
+
+# -- Tailscale discovery ------------------------------------------------------
+def _tailscale_auto_requested(args: argparse.Namespace) -> bool:
+    """Offer discovery when no host is configured and stdin is interactive.
+
+    Discovery is never automatic in scripts, cron, or systemd: without a TTY
+    there is nobody to select a host, and connecting to the first peer would
+    violate the explicit-selection rule.
+    """
+    if args.host is not None or args.qr or args.selftest or args.fake_payload:
+        return False
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    return "host" not in _load_file_config()
+
+
+def _print_peers(peers: list[Any], port: int) -> None:
+    print(f"Telemachus hosts on Tailscale (port {port} open):")
+    for index, peer in enumerate(peers, start=1):
+        detail = ", ".join(part for part in (peer.os, peer.dns) if part)
+        suffix = f" ({detail})" if detail else ""
+        print(f"  {index}. {peer.name}  {peer.ip}{suffix}")
+
+
+def _prompt_peer(peers: list[Any]) -> Optional[Any]:
+    """Prompt for a numbered selection; blank input cancels."""
+    while True:
+        try:
+            raw = input("Select a host by number (Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if not raw:
+            return None
+        try:
+            index = int(raw)
+        except ValueError:
+            print(f"Enter a number between 1 and {len(peers)}.")
+            continue
+        if 1 <= index <= len(peers):
+            return peers[index - 1]
+        print(f"Enter a number between 1 and {len(peers)}.")
+
+
+def _print_pairing_hint(host: str, port: int) -> None:
+    """Explain how to pair without inventing or printing a token."""
+    print(
+        "No token configured for this host. On the Mac, switch to Wireless "
+        "mode and show the pairing QR, then run:\n"
+        f"  {PAIRING_EXECUTABLE} --host {host} --port {port} "
+        "--qr '<telemachus:// pairing URI from the Mac>'"
+    )
+
+
+def apply_tailscale_discovery(
+    args: argparse.Namespace, cfg: ResolvedConfig
+) -> Optional[int]:
+    """Offer a Tailscale host picker and update ``cfg``.
+
+    Returns an exit code when the caller must stop (missing CLI, no
+    candidates, cancelled selection, or no token), otherwise ``None`` so the
+    normal connect path continues. ``--qr`` always wins: a paired URI already
+    carries host, port, and token and is never overridden by discovery.
+    """
+    explicit: bool = bool(args.discover_tailscale)
+    if args.qr or args.selftest or args.fake_payload:
+        return None
+    if not explicit and not _tailscale_auto_requested(args):
+        return None
+
+    from telemachus_client import tailscale  # noqa: PLC0415
+
+    if not tailscale.tailscale_available():
+        message = (
+            "--discover-tailscale: the tailscale CLI is not on PATH. "
+            "Install Tailscale or pass --host."
+        )
+        if explicit:
+            log.error(message)
+            print(message)
+            return 1
+        log.debug(message)
+        return None
+
+    peers: list[Any] = [p for p in tailscale.list_peers() if p.online]
+    if not peers:
+        message = "No online Tailscale peers were found."
+        if explicit:
+            print(message)
+            return 1
+        log.debug(message)
+        return None
+
+    hosts: list[Any] = tailscale.discover_hosts(peers, port=cfg.port)
+    if not hosts:
+        message = (
+            f"Found {len(peers)} online Tailscale peer(s), but none accept "
+            f"TCP on port {cfg.port}."
+        )
+        if explicit:
+            print(message)
+            return 1
+        log.debug(message)
+        return None
+
+    _print_peers(hosts, cfg.port)
+    selected: Optional[Any] = _prompt_peer(hosts)
+    if selected is None:
+        print("No host selected; not connecting.")
+        return 1
+
+    cfg.host = selected.ip
+    log.info("tailscale: selected %s (%s)", selected.name, selected.ip)
+    if not cfg.token:
+        _print_pairing_hint(cfg.host, cfg.port)
+        return 1
+    return None
 
 
 # -- synthetic exercise path -------------------------------------------------
@@ -294,7 +452,7 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     except ImportError as exc:
         raise SystemExit(f"ERROR: {exc}. Is pysdl2 installed? (pip install pysdl2)") from exc
     try:
-        from telemachus_client.netclient import StreamClient  # noqa: PLC0415
+        from telemachus_client.netclient import StreamClient, CONNECT_TIMEOUT_S  # noqa: PLC0415
     except ImportError as exc:
         raise SystemExit(
             "ERROR: telemachus_client/netclient.py is missing "
@@ -459,28 +617,17 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     )
     client_holder["client"] = client
 
-    # Fail fast on a bad token/host with a clear message, using a throwaway
-    # probe: the supervisor thread below owns the real client's connection
-    # lifecycle, and connect() on an already-connected client raises.
-    probe: Any = StreamClient(client_cfg)
+    # Fail fast on unreachable host with a clear message, using a lightweight
+    # TCP connect-only probe (no handshake). The supervisor owns the real
+    # handshake/token validation and reconnection logic.
     try:
-        probe.connect()
-    except Exception as exc:
-        # TokenRejectedError / ProtocolError are defined by the protocol
-        # worker; match by name so this file need not import them eagerly.
-        name_: str = type(exc).__name__
-        if name_ == "TokenRejectedError":
-            raise SystemExit(
-                "ERROR: token rejected. Reset the token on the Mac "
-                 "(switch to Wireless mode to show a fresh QR) and re-pair "
-                "with --qr."
-            ) from exc
-        raise SystemExit(f"ERROR: connect failed: {exc}") from exc
-    finally:
-        try:
-            probe.close()
-        except Exception:
-            pass
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(CONNECT_TIMEOUT_S)
+        sock.connect((cfg.host, cfg.port))
+        sock.close()
+    except OSError as exc:
+        raise SystemExit(f"ERROR: cannot reach {cfg.host}:{cfg.port}: {exc}") from exc
+
     try:
         client.send_capabilities(supports_metadata=True, avc_only=False,
                                  device_info=None)
@@ -658,10 +805,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     if args.fake_payload:
         return run_fake_payload(args)
+    if args.scout:
+        from telemachus_client.scout import run_scout  # noqa: PLC0415
+        return run_scout()
     try:
         cfg: ResolvedConfig = resolve_config(args)
     except ValueError as exc:
         raise SystemExit(f"ERROR: bad config: {exc}") from exc
+    if args.qr:
+        # Pairing is also persistence: the URI fills host/port/token/name, so
+        # write them out now and later runs start with no arguments.
+        _persist_pairing(cfg)
+    discovery_rc: Optional[int] = apply_tailscale_discovery(args, cfg)
+    if discovery_rc is not None:
+        return discovery_rc
     log.info("connecting to %s:%d as %r (decoder=%s display=%s %s input=%s)",
              cfg.host, cfg.port, cfg.name, cfg.decoder,
              cfg.display or "1920x1080@60 default",
