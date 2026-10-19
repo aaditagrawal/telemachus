@@ -3,6 +3,7 @@ import SwiftUI
 import Combine
 import ApplicationServices
 import os.log
+import Darwin
 @preconcurrency import ScreenCaptureKit
 
 private enum TelemachusLog {
@@ -92,6 +93,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindow: SettingsWindowController?
     var statusItem: NSStatusItem?
     let pairedDeviceStore = PairedDeviceStore()
+    let linuxClientTargetStore = LinuxClientTargetStore()
+    let linuxClientLauncher = LinuxClientLauncher()
     /// Name of the wireless device currently streaming (nil when no wireless client is active).
     /// Used to roll its `lastConnected` timestamp forward every status refresh tick so the UI
     /// shows "just now" while connected and freezes at the disconnect moment afterward.
@@ -394,6 +397,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        // Multi-display settings are applied when the virtual displays are built,
+        // so both need a stop/start cycle to take effect mid-run.
+        settings.$virtualDisplayCount
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] count in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard self.settings.isRunning else { return }
+                    debugLog("Virtual display count changed to \(count) — restarting server to rebuild displays")
+                    self.stopServer()
+                    await self.startServer()
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$streamedDisplayIndex
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] index in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard self.settings.isRunning else { return }
+                    debugLog("Streamed display index changed to \(index) — restarting server")
+                    self.stopServer()
+                    await self.startServer()
+                }
+            }
+            .store(in: &cancellables)
+
         settings.$hideDockIcon
             .dropFirst()
             .removeDuplicates()
@@ -470,6 +503,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.settings.wirelessTokenError = error.localizedDescription
                 debugLog("Could not reset wireless token: \(error.localizedDescription)")
                 return false
+            }
+        }
+
+        settings.onStartLinuxClient = { [weak self] in
+            guard let self = self else { return }
+            Task { @MainActor in
+                await self.triggerLinuxClient()
             }
         }
     }
@@ -706,6 +746,94 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func isServerListening(port: UInt16) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+
+        let flags = fcntl(fd, F_GETFL, 0)
+        guard flags >= 0 else { return false }
+        guard fcntl(fd, F_SETFL, flags | O_NONBLOCK) >= 0 else { return false }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port.bigEndian)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        if connectResult == 0 {
+            return true
+        }
+        guard errno == EINPROGRESS else { return false }
+
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        let pollResult = poll(&pfd, 1, 300)
+        guard pollResult > 0 else { return false }
+
+        var soError: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len) >= 0 else { return false }
+        return soError == 0
+    }
+
+    @MainActor
+    func triggerLinuxClient() async {
+        // Ensure we are in wireless mode with the server running before triggering.
+        if settings.connectionMode != .wireless {
+            settings.connectionMode = .wireless
+        }
+        if !settings.isRunning || !isServerListening(port: settings.port) {
+            if settings.isRunning {
+                stopServer()
+            }
+            await startServer()
+            // Poll for the TCP listener to come up (up to ~5s).
+            for _ in 0..<10 {
+                if isServerListening(port: settings.port) { break }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        if !isServerListening(port: settings.port) {
+            settings.linuxTriggerStatus = "Failed: Mac server not listening on port \\(settings.port) (check Screen Recording permission)"
+            return
+        }
+
+        let ip = settings.linuxTargetIP
+        guard !ip.isEmpty else {
+            settings.linuxTriggerStatus = "Failed: no peer selected"
+            return
+        }
+
+        let user = settings.linuxSSHUser.isEmpty ? "aditya" : settings.linuxSSHUser
+        let unit = "telemachus-linux.service"
+
+        // Resolve peer name from target store or Tailscale peers.
+        let name = linuxClientTargetStore.selectedPeerName
+            ?? TailscaleStatus.peers().first(where: { $0.ip == ip })?.name
+            ?? ip
+
+        linuxClientTargetStore.select(peerName: name, peerIP: ip, sshUser: user)
+        settings.linuxTriggerStatus = "Starting Linux client…"
+        linuxClientLauncher.launch(peerName: name, peerIP: ip, sshUser: user, unitName: unit) { [weak self] result in
+            Task { @MainActor in
+                guard let self = self else { return }
+                switch result {
+                case .success:
+                    self.settings.linuxTriggerStatus = "Started (or already running)"
+                case .failure(let error):
+                    self.settings.linuxTriggerStatus = "Failed: \(error.localizedDescription)"
+                }
+                self.linuxClientTargetStore.recordResult(self.settings.linuxTriggerStatus)
+            }
+        }
+    }
+
     func startServer() async {
         debugLog("🚀 startServer() invoked. Check permission: \(settings.hasScreenRecordingPermission)")
         guard settings.hasScreenRecordingPermission else {
@@ -723,15 +851,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             case .extended:
                 let manager = VirtualDisplayManager()
                 virtualDisplayManager = manager
-                try manager.createDisplay(
+                try manager.createDisplays(
+                    count: settings.virtualDisplayCount,
                     width: size.width,
                     height: size.height,
                     refreshRate: settings.refreshRate,
                     hiDPI: settings.hiDPI,
-                    name: "Telemachus"
+                    nameBase: "Telemachus"
                 )
 
-                // Disable mirror mode (may fail if already in extend mode).
+                // Stream the display the user selected (clamped inside the manager).
+                manager.selectedIndex = settings.streamedDisplayIndex
+
+                // Disable mirror mode on the selected display (may fail if already
+                // in extend mode).
                 try? manager.disableMirrorMode()
                 guard let createdID = manager.displayID else {
                     throw VirtualDisplayError.creationFailed("Display was created without a display ID")

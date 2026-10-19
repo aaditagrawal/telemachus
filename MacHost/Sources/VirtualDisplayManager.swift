@@ -4,20 +4,180 @@ import CGVirtualDisplayBridge
 
 /// Manages virtual display creation and lifecycle using CGVirtualDisplay API
 class VirtualDisplayManager {
-    private var virtualDisplay: CGVirtualDisplay?
-    private var adoptedDisplayID: CGDirectDisplayID?
-    private var displayDescriptor: CGVirtualDisplayDescriptor?
-    private var displaySettings: CGVirtualDisplaySettings?
+    /// Upper bound on how many virtual displays a single manager will create.
+    static let maxDisplayCount = 4
+
+    private var virtualDisplays: [CGVirtualDisplay] = []
+    private var adoptedDisplayIDs: [CGDirectDisplayID] = []
+    private var displayDescriptors: [CGVirtualDisplayDescriptor] = []
+    private var displaySettings: [CGVirtualDisplaySettings] = []
+
+    /// All display IDs owned by this manager, in creation order.
+    private(set) var displayIDs: [CGDirectDisplayID] = []
+
+    /// Index into `displayIDs` used by the single-display APIs (mirror, position,
+    /// `displayID`). Reads are clamped, so out-of-range values are harmless.
+    var selectedIndex: Int = 0
 
     var displayID: CGDirectDisplayID? {
-        return virtualDisplay?.displayID ?? adoptedDisplayID
+        guard let index = Self.clampedIndex(selectedIndex, count: displayIDs.count) else {
+            return nil
+        }
+        return displayIDs[index]
     }
 
     var isActive: Bool {
         return displayID != nil
     }
 
-    /// Create a virtual display with specified configuration
+    /// Clamp a requested display index into `0..<count`.
+    /// Returns nil when there are no displays to select.
+    static func clampedIndex(_ index: Int, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        return min(max(index, 0), count - 1)
+    }
+
+    /// Clamp a requested display count into `1...maxDisplayCount`.
+    static func clampedDisplayCount(_ count: Int) -> Int {
+        return min(max(count, 1), maxDisplayCount)
+    }
+
+    /// Create `count` virtual displays side-by-side and select the first.
+    /// - Parameters:
+    ///   - count: Number of displays to create (clamped to 1...4)
+    ///   - width: Display width in pixels
+    ///   - height: Display height in pixels
+    ///   - refreshRate: Refresh rate in Hz (default: 60)
+    ///   - hiDPI: Enable HiDPI mode (default: false)
+    ///   - nameBase: Base display name; each display is suffixed with its 1-based index
+    func createDisplays(
+        count: Int,
+        width: Int,
+        height: Int,
+        refreshRate: Int = 60,
+        hiDPI: Bool = false,
+        nameBase: String = "Virtual Display"
+    ) throws {
+        // Clean up existing displays if any
+        destroyDisplay()
+
+        guard width > 0, height > 0 else {
+            throw VirtualDisplayError.creationFailed(
+                "Invalid display dimensions \(width)x\(height)"
+            )
+        }
+
+        let displayCount = Self.clampedDisplayCount(count)
+
+        // Physical pixels = 2x logical when HiDPI, 1x otherwise
+        let physW = hiDPI ? width * 2 : width
+        let physH = hiDPI ? height * 2 : height
+        // Use width * 10000 + height so (3840,2400) != (2400,3840) — avoids
+        // portrait/landscape collision. Each display folds in its index.
+        let baseProductID = UInt32((physW * 10000 + physH) & 0xFFFFFFFF)
+
+        for index in 0..<displayCount {
+            let productID = baseProductID + UInt32(index)
+            let serialNum = 0x0001 + UInt32(index)
+            let name = "\(nameBase) \(index + 1)"
+
+            // CGVirtualDisplay can remain registered with WindowServer across a
+            // host restart. Reuse the exact Telemachus display instead of trying
+            // to create a duplicate, which the private API rejects.
+            if let existingID = Self.findExistingDisplay(
+                productID: productID,
+                serialNum: serialNum,
+                width: physW,
+                height: physH,
+                refreshRate: refreshRate
+            ) {
+                adoptedDisplayIDs.append(existingID)
+                displayIDs.append(existingID)
+                debugLog(
+                    "Reusing existing Telemachus virtual display \(existingID) " +
+                    "(\(name)): \(physW)x\(physH) @ \(refreshRate)Hz"
+                )
+                continue
+            }
+
+            // Create display descriptor
+            let descriptor = CGVirtualDisplayDescriptor()
+            descriptor.name = name
+            descriptor.maxPixelsWide = UInt32(physW)
+            descriptor.maxPixelsHigh = UInt32(physH)
+
+            // HiDPI needs high PPI so macOS recognises as Retina (≥200 PPI threshold)
+            // non-HiDPI stays at 110 PPI (typical tablet assumption)
+            let ppi: Double = hiDPI ? 220.0 : 110.0
+            descriptor.sizeInMillimeters = CGSize(
+                width: Double(physW) * 25.4 / ppi,
+                height: Double(physH) * 25.4 / ppi
+            )
+
+            descriptor.productID = productID
+            descriptor.vendorID = 0xEEEE
+            descriptor.serialNum = serialNum
+
+            displayDescriptors.append(descriptor)
+
+            // Create display settings
+            let settings = CGVirtualDisplaySettings()
+            settings.hiDPI = hiDPI ? 1 : 0
+
+            // HiDPI: anchor mode (physical) + logical mode
+            // The anchor tells macOS "this display is high-density" → unlocks HiDPI for logical mode
+            // non-HiDPI: single mode at requested resolution
+            var modes: [CGVirtualDisplayMode] = []
+            if hiDPI {
+                modes.append(CGVirtualDisplayMode(
+                    width: UInt32(physW),
+                    height: UInt32(physH),
+                    refreshRate: Double(refreshRate)
+                ))
+            }
+            modes.append(CGVirtualDisplayMode(
+                width: UInt32(width),
+                height: UInt32(height),
+                refreshRate: Double(refreshRate)
+            ))
+            settings.modes = modes
+
+            displaySettings.append(settings)
+
+            // Create virtual display
+            guard let display = CGVirtualDisplay(descriptor: descriptor) else {
+                destroyDisplay()
+                throw VirtualDisplayError.creationFailed(
+                    "Failed to create CGVirtualDisplay \(index + 1) of \(displayCount)"
+                )
+            }
+
+            virtualDisplays.append(display)
+
+            // Apply settings
+            guard display.apply(settings) else {
+                destroyDisplay()
+                throw VirtualDisplayError.settingsApplyFailed(
+                    "Failed to apply settings to display \(index + 1) of \(displayCount)"
+                )
+            }
+
+            displayIDs.append(display.displayID)
+
+            let modeDesc = hiDPI
+                ? "\(width)x\(height) HiDPI (physical \(physW)x\(physH))"
+                : "\(width)x\(height)"
+            print(
+                "✅ Virtual display \(index + 1)/\(displayCount) created: " +
+                "\(modeDesc) @ \(refreshRate)Hz (ID: \(display.displayID))"
+            )
+        }
+
+        arrangeSideBySide(width: width)
+        selectedIndex = 0
+    }
+
+    /// Create a single virtual display with specified configuration
     /// - Parameters:
     ///   - width: Display width in pixels
     ///   - height: Display height in pixels
@@ -31,97 +191,55 @@ class VirtualDisplayManager {
         hiDPI: Bool = false,
         name: String = "Virtual Display"
     ) throws {
-        // Clean up existing display if any
-        destroyDisplay()
+        try createDisplays(
+            count: 1,
+            width: width,
+            height: height,
+            refreshRate: refreshRate,
+            hiDPI: hiDPI,
+            nameBase: name
+        )
+    }
 
-        // Physical pixels = 2x logical when HiDPI, 1x otherwise
-        let physW = hiDPI ? width * 2 : width
-        let physH = hiDPI ? height * 2 : height
-        let productID = UInt32((physW * 10000 + physH) & 0xFFFFFFFF)
+    /// Lay the managed displays out left-to-right at y = 0, one display width apart.
+    /// Arrangement is best-effort: a failure leaves the displays usable and
+    /// recoverable with `setDisplayPosition`.
+    private func arrangeSideBySide(width: Int) {
+        guard displayIDs.count > 1 else { return }
 
-        // CGVirtualDisplay can remain registered with WindowServer across a
-        // host restart. Reuse the exact Telemachus display instead of trying to
-        // create a duplicate, which the private API rejects.
-        if let existingID = Self.findExistingDisplay(
-            productID: productID,
-            width: physW,
-            height: physH,
-            refreshRate: refreshRate
-        ) {
-            adoptedDisplayID = existingID
-            debugLog(
-                "Reusing existing Telemachus virtual display \(existingID): " +
-                "\(physW)x\(physH) @ \(refreshRate)Hz"
-            )
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success, let config = config else {
+            debugLog("⚠️  Could not begin display configuration for arrangement")
             return
         }
 
-        // Create display descriptor
-        let descriptor = CGVirtualDisplayDescriptor()
-        descriptor.name = name
-        descriptor.maxPixelsWide = UInt32(physW)
-        descriptor.maxPixelsHigh = UInt32(physH)
-
-        // HiDPI needs high PPI so macOS recognises as Retina (≥200 PPI threshold)
-        // non-HiDPI stays at 110 PPI (typical tablet assumption)
-        let ppi: Double = hiDPI ? 220.0 : 110.0
-        descriptor.sizeInMillimeters = CGSize(
-            width: Double(physW) * 25.4 / ppi,
-            height: Double(physH) * 25.4 / ppi
-        )
-
-        // Set vendor/product IDs
-        // Use width * 10000 + height so (3840,2400) ≠ (2400,3840) — avoids portrait/landscape collision
-        descriptor.productID = productID
-        descriptor.vendorID = 0xEEEE
-        descriptor.serialNum = 0x0001
-
-        self.displayDescriptor = descriptor
-
-        // Create display settings
-        let settings = CGVirtualDisplaySettings()
-        settings.hiDPI = hiDPI ? 1 : 0
-
-        // HiDPI: anchor mode (physical) + logical mode
-        // The anchor tells macOS "this display is high-density" → unlocks HiDPI for logical mode
-        // non-HiDPI: single mode at requested resolution
-        var modes: [CGVirtualDisplayMode] = []
-        if hiDPI {
-            modes.append(CGVirtualDisplayMode(
-                width: UInt32(physW),
-                height: UInt32(physH),
-                refreshRate: Double(refreshRate)
-            ))
-        }
-        modes.append(CGVirtualDisplayMode(
-            width: UInt32(width),
-            height: UInt32(height),
-            refreshRate: Double(refreshRate)
-        ))
-        settings.modes = modes
-
-        self.displaySettings = settings
-
-        // Create virtual display
-        guard let display = CGVirtualDisplay(descriptor: descriptor) else {
-            throw VirtualDisplayError.creationFailed("Failed to create CGVirtualDisplay")
+        for (index, id) in displayIDs.enumerated() where index > 0 {
+            let originResult = CGConfigureDisplayOrigin(
+                config,
+                id,
+                Int32(clamping: index * width),
+                0
+            )
+            if originResult != .success {
+                CGCancelDisplayConfiguration(config)
+                debugLog(
+                    "⚠️  Could not position display \(id) at x=\(index * width): \(originResult)"
+                )
+                return
+            }
         }
 
-        self.virtualDisplay = display
-
-        // Apply settings
-        let result = display.apply(settings)
-        if !result {
-            destroyDisplay()
-            throw VirtualDisplayError.settingsApplyFailed("Failed to apply settings")
+        let completeResult = CGCompleteDisplayConfiguration(config, .forSession)
+        if completeResult != .success {
+            debugLog("⚠️  Could not complete display arrangement: \(completeResult)")
+        } else {
+            print("📍 \(displayIDs.count) virtual displays arranged side-by-side")
         }
-
-        let modeDesc = hiDPI ? "\(width)x\(height) HiDPI (physical \(physW)x\(physH))" : "\(width)x\(height)"
-        print("✅ Virtual display created: \(modeDesc) @ \(refreshRate)Hz (ID: \(display.displayID))")
     }
 
     private static func findExistingDisplay(
         productID: UInt32,
+        serialNum: UInt32,
         width: Int,
         height: Int,
         refreshRate: Int
@@ -135,7 +253,7 @@ class VirtualDisplayManager {
         return onlineDisplays.prefix(Int(displayCount)).first { displayID in
             guard CGDisplayVendorNumber(displayID) == 0xEEEE,
                   CGDisplayModelNumber(displayID) == productID,
-                  CGDisplaySerialNumber(displayID) == 1,
+                  CGDisplaySerialNumber(displayID) == serialNum,
                   Int(CGDisplayPixelsWide(displayID)) == width,
                   Int(CGDisplayPixelsHigh(displayID)) == height,
                   let mode = CGDisplayCopyDisplayMode(displayID) else {
@@ -168,7 +286,7 @@ class VirtualDisplayManager {
         )
     }
 
-    /// Enable mirror mode with main display
+    /// Enable mirror mode with main display for the selected display
     func enableMirrorMode() throws {
         guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
@@ -203,7 +321,7 @@ class VirtualDisplayManager {
         print("✅ Mirror mode enabled")
     }
 
-    /// Disable mirror mode (extend mode)
+    /// Disable mirror mode (extend mode) for the selected display
     func disableMirrorMode() throws {
         guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
@@ -237,14 +355,14 @@ class VirtualDisplayManager {
         print("✅ Extend mode enabled (mirror disabled)")
     }
 
-    /// Get current display position (origin)
+    /// Get the selected display's current position (origin)
     func getDisplayPosition() -> CGPoint? {
         guard let displayID = displayID else { return nil }
         let bounds = CGDisplayBounds(displayID)
         return bounds.origin
     }
 
-    /// Set display position in arrangement
+    /// Set the selected display's position in arrangement
     func setDisplayPosition(x: Int32, y: Int32) throws {
         guard let displayID else {
             throw VirtualDisplayError.displayNotCreated
@@ -273,7 +391,7 @@ class VirtualDisplayManager {
         print("📍 Display position set to (\(x), \(y))")
     }
 
-    /// Save current display position to UserDefaults
+    /// Save the selected display's position to UserDefaults
     func saveDisplayPosition() {
         guard let position = getDisplayPosition() else { return }
         let defaults = UserDefaults.standard
@@ -283,7 +401,7 @@ class VirtualDisplayManager {
         print("💾 Saved display position: (\(Int(position.x)), \(Int(position.y)))")
     }
 
-    /// Restore saved display position
+    /// Restore saved display position on the selected display
     func restoreDisplayPosition() {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "Telemachus_hasPosition") else {
@@ -302,7 +420,7 @@ class VirtualDisplayManager {
         }
     }
 
-    /// Verify the virtual display is registered in the system display list
+    /// Verify the selected virtual display is registered in the system display list
     func verifyDisplayRegistered() -> Bool {
         guard let displayID = displayID else {
             debugLog("verifyDisplayRegistered: no displayID set")
@@ -324,15 +442,19 @@ class VirtualDisplayManager {
         return found
     }
 
-    /// Destroy the virtual display
+    /// Destroy all virtual displays managed by this instance
     func destroyDisplay() {
-        if virtualDisplay != nil {
-            virtualDisplay = nil
-            displayDescriptor = nil
-            displaySettings = nil
-            print("🗑️  Virtual display destroyed")
+        let destroyedCount = virtualDisplays.count + adoptedDisplayIDs.count
+        virtualDisplays.removeAll()
+        adoptedDisplayIDs.removeAll()
+        displayDescriptors.removeAll()
+        displaySettings.removeAll()
+        displayIDs.removeAll()
+        selectedIndex = 0
+
+        if destroyedCount > 0 {
+            print("🗑️  \(destroyedCount) virtual display(s) destroyed")
         }
-        adoptedDisplayID = nil
     }
 
     deinit {

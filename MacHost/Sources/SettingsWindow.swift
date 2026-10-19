@@ -1276,6 +1276,26 @@ class DisplaySettings: ObservableObject {
     @Published var adbDeviceSerial: String {
         didSet { save("adbDeviceSerial", adbDeviceSerial) }
     }
+    /// Number of virtual displays created in extended mode (1...4).
+    @Published var virtualDisplayCount: Int {
+        didSet { save("virtualDisplayCount", virtualDisplayCount) }
+    }
+    /// Index of the virtual display that gets streamed (0-based).
+    @Published var streamedDisplayIndex: Int {
+        didSet { save("streamedDisplayIndex", streamedDisplayIndex) }
+    }
+    /// Selected Linux client target IP for the SSH trigger.
+    @Published var linuxTargetIP: String {
+        didSet { save("linuxTargetIP", linuxTargetIP) }
+    }
+    /// SSH user for the Linux client trigger (default "aditya").
+    @Published var linuxSSHUser: String {
+        didSet { save("linuxSSHUser", linuxSSHUser) }
+    }
+    /// Last status text from triggering the Linux client.
+    @Published var linuxTriggerStatus: String {
+        didSet { save("linuxTriggerStatus", linuxTriggerStatus) }
+    }
 
     // Runtime state (not persisted)
     @Published var displayCreated = false
@@ -1309,6 +1329,7 @@ class DisplaySettings: ObservableObject {
     var onRequestScreenRecordingPermission: (() -> Void)?
     var onRequestAccessibilityPermission: (() -> Void)?
     var onResetWirelessToken: (() -> Bool)?
+    var onStartLinuxClient: (() -> Void)?
 
     init() {
         self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "2000x1200"
@@ -1337,6 +1358,17 @@ class DisplaySettings: ObservableObject {
         self.adbDeviceSerial = defaults.string(
             forKey: keyPrefix + "adbDeviceSerial"
         ) ?? ""
+        self.virtualDisplayCount = VirtualDisplayManager.clampedDisplayCount(
+            defaults.object(forKey: keyPrefix + "virtualDisplayCount") as? Int ?? 1
+        )
+        self.streamedDisplayIndex = max(
+            0,
+            defaults.object(forKey: keyPrefix + "streamedDisplayIndex") as? Int ?? 0
+        )
+
+        self.linuxTargetIP = defaults.string(forKey: keyPrefix + "linuxTargetIP") ?? ""
+        self.linuxSSHUser = defaults.string(forKey: keyPrefix + "linuxSSHUser") ?? "aditya"
+        self.linuxTriggerStatus = defaults.string(forKey: keyPrefix + "linuxTriggerStatus") ?? ""
 
         print("Loaded settings: \(resolution) @ \(refreshRate)Hz, bitrate=\(bitrate), quality=\(quality)")
     }
@@ -1407,6 +1439,10 @@ class DisplaySettings: ObservableObject {
 
     func resetWirelessToken() -> Bool {
         onResetWirelessToken?() ?? false
+    }
+
+    func startLinuxClient() {
+        onStartLinuxClient?()
     }
 
     /// Detect rebuilds / re-signs that can leave stale TCC grants. Uses a
@@ -1624,6 +1660,17 @@ struct WirelessSection: View {
     /// the underlying lastConnected timestamp hasn't changed (e.g. while a
     /// device is disconnected and we still want "5 minutes ago" to count up).
     @State private var nowTick: Date = Date()
+    /// Peers from `tailscale status --json`; empty when Tailscale is missing
+    /// or stopped.
+    @State private var tailscalePeers: [TailscalePeer] = []
+    /// Whether the `tailscale` CLI is installed and its daemon is reachable.
+    @State private var tailscaleAvailable = false
+    /// Drives the transient "Copied" label on the copy button.
+    @State private var copied = false
+    /// Full authorized_keys line for this Mac's SSH key, shown in the Linux client setup hint.
+    @State private var macAuthorizedKeysLine = ""
+    /// Transient "Copied" state for the authorized_keys copy button.
+    @State private var copiedAuthorizedKeys = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -1685,6 +1732,139 @@ struct WirelessSection: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+
+            FrostedGroupBox(
+                title: "Tailscale peers",
+                icon: "network",
+                content: {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !tailscaleAvailable {
+                        Text("Tailscale not installed or not running.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if tailscalePeers.isEmpty {
+                        Text("No peers reported by Tailscale.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(tailscalePeers) { peer in
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(peer.online ? Color.green : Color.secondary)
+                                        .frame(width: 6, height: 6)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(peer.name)
+                                            .font(.system(size: 12, weight: .medium))
+                                        Text(peer.os.isEmpty
+                                             ? peer.ip
+                                             : "\(peer.ip) · \(peer.os)")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(peer.online ? "Online" : "Offline")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(peer.online ? .green : .secondary)
+                                }
+                                .padding(6)
+                                .background(.ultraThinMaterial)
+                                .cornerRadius(6)
+                            }
+                        }
+                    }
+
+                    Button(action: copyPairingURL) {
+                        HStack(spacing: 4) {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            Text(copied ? "Copied" : "Copy pairing URL")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Copies a telemachus:// pairing URL over the Tailscale address when available, otherwise the LAN address.")
+                }
+            },
+            trailing: {
+                Button(action: refreshTailscale) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh Tailscale peers")
+            })
+
+            FrostedGroupBox(title: "Linux client", icon: "terminal", content: {
+                VStack(alignment: .leading, spacing: 8) {
+                    let onlinePeers = tailscalePeers.filter { $0.online }
+                    if onlinePeers.isEmpty {
+                        Text("No online Tailscale peers. Start Tailscale and refresh.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Picker("Peer", selection: $settings.linuxTargetIP) {
+                            ForEach(onlinePeers) { peer in
+                                Text("\(peer.name) (\(peer.ip))").tag(peer.ip)
+                            }
+                        }
+                        .font(.system(size: 11))
+                    }
+
+                    TextField("SSH user", text: $settings.linuxSSHUser)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+
+                    HStack(spacing: 8) {
+                        Button(action: { settings.startLinuxClient() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                Text("Start Linux client")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(settings.linuxTargetIP.isEmpty)
+
+                        if !settings.linuxTriggerStatus.isEmpty {
+                            Text(settings.linuxTriggerStatus)
+                                .font(.system(size: 11))
+                                .foregroundColor(settings.linuxTriggerStatus.lowercased().contains("fail") || settings.linuxTriggerStatus.lowercased().contains("error") ? .red : .secondary)
+                                .lineLimit(2)
+                        }
+                    }
+
+                    if settings.linuxTriggerStatus.lowercased().contains("fail")
+                        || settings.linuxTriggerStatus.lowercased().contains("error")
+                        || settings.linuxTriggerStatus.lowercased().contains("denied")
+                        || settings.linuxTriggerStatus.lowercased().contains("timeout") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Install this Mac's public key on the Linux host (authorized_keys):")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("", text: $macAuthorizedKeysLine)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 9, design: .monospaced))
+                                .disabled(true)
+                                .textSelection(.enabled)
+                            Button(action: copyMacAuthorizedKeysLine) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: copiedAuthorizedKeys ? "checkmark" : "doc.on.doc")
+                                    Text(copiedAuthorizedKeys ? "Copied" : "Copy")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            })
 
             FrostedGroupBox(
                 title: "Paired Devices (\(pairedDevices.count))",
@@ -1749,6 +1929,8 @@ struct WirelessSection: View {
         .onAppear {
             refreshQR()
             refreshPaired()
+            refreshTailscale()
+            refreshMacAuthorizedKeysLine()
             nowTick = Date()
         }
         // One-parameter onChange(of:perform:) works on macOS 13+. The
@@ -1758,6 +1940,9 @@ struct WirelessSection: View {
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { now in
             nowTick = now
             refreshPaired()
+        }
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            refreshTailscale()
         }
         .alert("Reset Token?", isPresented: $showResetConfirm) {
             Button("Cancel", role: .cancel) { }
@@ -1789,11 +1974,68 @@ struct WirelessSection: View {
         }
         let name = Host.current().localizedName ?? "Mac"
         let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
+        let pairingURLFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("telemachus-pairing.url")
+        try? url.write(to: pairingURLFile, atomically: true, encoding: .utf8)
         qrImage = QRRenderer.render(url: url, size: 180)
     }
 
     private func refreshPaired() {
         pairedDevices = pairedDeviceStore.all()
+    }
+
+    /// Runs `tailscale status` off the main thread — it spawns a process, and
+    /// this fires on appear plus every 10s. Results are applied on main.
+    private func refreshTailscale() {
+        DispatchQueue.global(qos: .utility).async {
+            let available = TailscaleStatus.available()
+            let peers = available ? TailscaleStatus.peers() : []
+            DispatchQueue.main.async {
+                tailscaleAvailable = available
+                tailscalePeers = peers
+            }
+        }
+    }
+
+    /// Copies a pairing URL to the clipboard, preferring this Mac's Tailscale
+    /// address and falling back to the LAN address when Tailscale is absent.
+    private func copyPairingURL() {
+        let token: Data
+        do {
+            token = try WirelessAuth.loadOrCreate()
+            settings.wirelessTokenError = nil
+        } catch {
+            settings.wirelessTokenError = error.localizedDescription
+            return
+        }
+        guard let host = TailscaleStatus.tailscaleIP() ?? LANAddressResolver.primaryIPv4() else {
+            return
+        }
+        let name = Host.current().localizedName ?? "Mac"
+        let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+    }
+
+    /// Ensures this Mac has an SSH key pair and loads its authorized_keys line.
+    private func refreshMacAuthorizedKeysLine() {
+        let launcher = LinuxClientLauncher()
+        if !FileManager.default.fileExists(atPath: launcher.keyPath + ".pub") {
+            _ = try? launcher.generateKey()
+        }
+        macAuthorizedKeysLine = launcher.authorizedKeysLine() ?? ""
+    }
+
+    private func copyMacAuthorizedKeysLine() {
+        guard !macAuthorizedKeysLine.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(macAuthorizedKeysLine, forType: .string)
+        copiedAuthorizedKeys = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedAuthorizedKeys = false }
     }
 
     private func relativeTimeString(from past: Date, to now: Date) -> String {
