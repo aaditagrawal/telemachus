@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+<a id="v0.0.6-experimental-settings-dismissal"></a>
+## [v0.0.6-experimental-settings-dismissal] - 2026-10-19
+
+### Fixed
+- Tapping anywhere outside the Android Display Settings card dismisses it
+  without forwarding the touch to the Mac (#22 / #23).
+- Taps inside the card keep settings open while controls and scrolling work.
+  The panel's height limit follows screen rotation and window resizing.
+
+---
+
 <a id="v0.0.5-experimental-graceful-shutdown"></a>
 ## [v0.0.5-experimental-graceful-shutdown] - 2026-07-24
 
