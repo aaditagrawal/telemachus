@@ -270,22 +270,22 @@ class MainActivity : AppCompatActivity() {
      * Uses modern WindowInsets API on Android R+ for better system compatibility
      * Also handles display cutout (notch) to use full screen area
      */
-    private fun enableFullscreenMode() {
+    private fun enableFullscreenMode(targetWindow: Window = window) {
         // Ensure we draw behind the cutout
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode =
+            targetWindow.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { controller ->
+            targetWindow.setDecorFitsSystemWindows(false)
+            targetWindow.insetsController?.let { controller ->
                 controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
+            targetWindow.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                     or View.SYSTEM_UI_FLAG_FULLSCREEN
                     or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -565,6 +565,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
 
         val view = dialog.findViewById<View>(android.R.id.content)
+        view.findViewById<View>(R.id.settingsScrim).setOnClickListener { dialog.dismiss() }
         val showStatsSwitch = view.findViewById<SwitchMaterial>(R.id.showStatsSwitch)
         val opacitySlider = view.findViewById<Slider>(R.id.opacitySlider)
         val opacityValue = view.findViewById<TextView>(R.id.opacityValue)
@@ -711,10 +712,10 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
 
-        // Cap dialog height to 85% of screen so content scrolls on smaller screens / landscape
+        // The window owns all touches; the layout limits the centered panel's height.
         dialog.window?.let { win ->
-            val maxH = (resources.displayMetrics.heightPixels * 0.85).toInt()
-            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, maxH)
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+            enableFullscreenMode(win)
         }
     }
 
