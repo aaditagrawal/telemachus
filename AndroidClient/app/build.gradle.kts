@@ -180,15 +180,15 @@ tasks
 
 dependencies {
     //noinspection GradleDependency
-    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.core:core-ktx:1.13.1")
     //noinspection GradleDependency
-    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.appcompat:appcompat:1.7.1")
     //noinspection GradleDependency
-    implementation("com.google.android.material:material:1.11.0")
+    implementation("com.google.android.material:material:1.12.0")
     //noinspection GradleDependency
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
     // Wireless mode (0.8.0)
     // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
@@ -201,8 +201,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     //noinspection GradleDependency
     implementation("androidx.camera:camera-view:1.4.2")
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("org.robolectric:robolectric:4.17")
 }
