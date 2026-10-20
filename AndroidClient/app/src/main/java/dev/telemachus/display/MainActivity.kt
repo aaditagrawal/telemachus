@@ -251,9 +251,13 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == LocalNetworkPermissionManager.REQUEST_CODE) {
             val granted = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
             localNetworkPermission.onPermissionResult(granted)
-            if (prefs.connectionMode != ConnectionMode.WIRELESS) return
             if (!granted) {
-                wirelessController.show()
+                if (prefs.connectionMode == ConnectionMode.WIRELESS) {
+                    wirelessController.show()
+                } else {
+                    automaticUsbConnect = false
+                    updateStatus(getString(R.string.local_network_permission_title))
+                }
                 android.app.AlertDialog
                     .Builder(this)
                     .setTitle(R.string.local_network_permission_title)
@@ -1052,7 +1056,7 @@ class MainActivity : AppCompatActivity() {
         deviceName: String,
         macName: String,
     ) {
-        if (localNetworkPermission.requestIfNeeded {
+        if (localNetworkPermission.requestIfNeeded(host) {
                 if (prefs.connectionMode == ConnectionMode.WIRELESS) {
                     connectWireless(host, port, token, deviceName, macName)
                 }
@@ -1089,6 +1093,12 @@ class MainActivity : AppCompatActivity() {
         automatic: Boolean = false,
     ) {
         if (isConnected || connectionAttemptInProgress) return
+        if (localNetworkPermission.requestIfNeeded(host) {
+                if (prefs.connectionMode == ConnectionMode.USB) connect(host, port, automatic)
+            }
+        ) {
+            return
+        }
         connectionAttemptInProgress = true
         lifecycleScope.launch(Dispatchers.IO) {
             try {

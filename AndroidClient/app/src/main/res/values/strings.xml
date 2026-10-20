@@ -72,6 +72,6 @@
     <string name="connected_streaming">Connected — streaming active</string>
     <string name="fork_credit">A fork of SideScreen by Tran Vuong Quoc Dat and contributors\nhttps://github.com/tranvuongquocdat/SideScreen</string>
     <string name="local_network_permission_title">Allow access to your Mac</string>
-    <string name="local_network_permission_message">Wireless display needs the Nearby devices permission to connect to your Mac on the local network. Allow it in app settings, then tap Reconnect.</string>
+    <string name="local_network_permission_message">Connecting to your Mac over the local network needs the Nearby devices permission. Allow it in app settings, then reconnect.</string>
     <string name="local_network_permission_settings">Open settings</string>
 </resources>

@@ -24,7 +24,7 @@ class LocalNetworkPermissionManagerTest {
             val activity = controller.get()
             val manager = LocalNetworkPermissionManager(activity)
             var connections = 0
-            assertTrue(manager.requestIfNeeded { connections++ })
+            assertTrue(manager.requestIfNeeded("192.0.2.1") { connections++ })
             val request = requireNotNull(shadowOf(activity).lastRequestedPermission)
             assertEquals(LocalNetworkPermissionManager.REQUEST_CODE, request.requestCode)
             assertArrayEquals(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), request.requestedPermissions)
@@ -43,13 +43,28 @@ class LocalNetworkPermissionManagerTest {
         try {
             val manager = LocalNetworkPermissionManager(controller.get())
             var connections = 0
-            assertTrue(manager.requestIfNeeded { connections++ })
+            assertTrue(manager.requestIfNeeded("192.0.2.1") { connections++ })
             manager.onPermissionResult(false)
             manager.onPermissionResult(true)
             assertEquals(0, connections)
-            assertTrue(manager.requestIfNeeded { connections++ })
+            assertTrue(manager.requestIfNeeded("192.0.2.1") { connections++ })
             manager.onPermissionResult(true)
             assertEquals(1, connections)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `USB loopback addresses never request nearby devices permission`() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val activity = controller.get()
+            val manager = LocalNetworkPermissionManager(activity)
+            for (host in listOf("127.0.0.1", "127.0.0.2", "localhost", "::1", "[::1]", "0:0:0:0:0:0:0:1")) {
+                assertFalse(manager.requestIfNeeded(host) { error("No deferred loopback connection") })
+            }
+            assertNull(shadowOf(activity).lastRequestedPermission)
         } finally {
             controller.pause().stop().destroy()
         }
@@ -61,7 +76,11 @@ class LocalNetworkPermissionManagerTest {
         val controller = Robolectric.buildActivity(Activity::class.java).setup()
         try {
             val activity = controller.get()
-            assertFalse(LocalNetworkPermissionManager(activity).requestIfNeeded { error("No deferred connection") })
+            assertFalse(
+                LocalNetworkPermissionManager(
+                    activity,
+                ).requestIfNeeded("192.0.2.1") { error("No deferred connection") },
+            )
             assertNull(shadowOf(activity).lastRequestedPermission)
         } finally {
             controller.pause().stop().destroy()
