@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var connectionAttemptInProgress = false
     private var automaticUsbConnect = false
     private var connectionDetailsVisible = false
+    private val localNetworkPermission by lazy { LocalNetworkPermissionManager(this) }
     private val autoConnectHandler = Handler(Looper.getMainLooper())
     private val autoConnectRunnable =
         Runnable {
@@ -247,6 +248,23 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LocalNetworkPermissionManager.REQUEST_CODE) {
+            val granted = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            localNetworkPermission.onPermissionResult(granted)
+            if (prefs.connectionMode != ConnectionMode.WIRELESS) return
+            if (!granted) {
+                wirelessController.show()
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle(R.string.local_network_permission_title)
+                    .setMessage(R.string.local_network_permission_message)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(
+                        R.string.local_network_permission_settings,
+                    ) { _, _ -> cameraPerm.openAppSettings() }
+                    .show()
+            }
+        }
         if (requestCode == WirelessTabController.REQ_CAMERA) {
             val granted = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
             wirelessController.onCameraPermissionResult(granted)
@@ -1034,6 +1052,14 @@ class MainActivity : AppCompatActivity() {
         deviceName: String,
         macName: String,
     ) {
+        if (localNetworkPermission.requestIfNeeded {
+                if (prefs.connectionMode == ConnectionMode.WIRELESS) {
+                    connectWireless(host, port, token, deviceName, macName)
+                }
+            }
+        ) {
+            return
+        }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 log("Connecting wirelessly to $macName at $host:$port...")

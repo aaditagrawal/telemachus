@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.57.1"
-SHA256="aa2e0f8f8272545e5593ebedd7872db51132fcec4ead76d001bbe17af69c7ae5"
+VERSION="0.65.1"
+SHA256="c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0"
 ARCHIVE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/telemachus-swiftlint-${VERSION}.zip"
 INSTALL_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/telemachus-swiftlint-${VERSION}"
 

@@ -135,7 +135,7 @@ on, and USB is the default startup mode.
 
 ## Build from source
 
-Source builds require a full Xcode/Swift toolchain, JDK 17, Android SDK 34, and
+Source builds require a full Xcode/Swift toolchain, JDK 21, Android SDK 37, and
 Android platform tools:
 
 ```bash

@@ -1,6 +1,14 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.Internal
+
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+}
+
+abstract class SyncOpenSourceNotices : Sync() {
+    @get:Internal
+    abstract val assetsDirectory: DirectoryProperty
 }
 
 val appVersion = providers.environmentVariable("TELEMACHUS_VERSION").getOrElse("0.0.0")
@@ -37,7 +45,7 @@ if (releasePackagingRequested && !releaseSigningConfigured) {
 
 android {
     namespace = "dev.telemachus.display"
-    compileSdk = 34
+    compileSdk { version = release(37) }
 
     // AGP reads this experimental property (values: "4k" | "16k" | "64k").
     // The obsolete gradle.properties key android.nativeLibrary.alignment is ignored.
@@ -46,8 +54,7 @@ android {
     defaultConfig {
         applicationId = "dev.telemachus.display"
         minSdk = 26
-        //noinspection OldTargetApi
-        targetSdk = 34 // Match the currently installed SDK; API compatibility is covered in CI.
+        targetSdk = 37
         versionCode = computedVersionCode
         versionName = appVersion
     }
@@ -75,16 +82,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-    }
-
     buildFeatures {
         viewBinding = true
-    }
-
-    sourceSets {
-        getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/oss-notices"))
     }
 
     testOptions {
@@ -93,14 +92,19 @@ android {
     }
 }
 
-val syncOpenSourceNotices by tasks.registering(Sync::class) {
+val syncOpenSourceNotices = tasks.register<SyncOpenSourceNotices>("syncOpenSourceNotices") {
     from(rootProject.projectDir.parentFile) {
-        include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt")
+        include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt", "licenses/Checker-qual-MIT.txt")
     }
-    into(layout.buildDirectory.dir("generated/oss-notices"))
+    assetsDirectory.set(layout.buildDirectory.dir("generated/oss-notices"))
+    into(assetsDirectory)
 }
 
-val generateReleaseDependencyLicenses by tasks.registering {
+androidComponents.onVariants { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(syncOpenSourceNotices) { it.assetsDirectory }
+}
+
+val generateReleaseDependencyLicenses = tasks.register("generateReleaseDependencyLicenses") {
     val outputFile =
         layout.buildDirectory.file(
             "generated/dependency-license-report/ANDROID_RUNTIME_DEPENDENCY_LICENSES.md",
@@ -118,19 +122,29 @@ val generateReleaseDependencyLicenses by tasks.registering {
                 "com.google.zxing",
                 "org.jetbrains",
             )
+        // Reviewed against the published POMs and upstream source license notices.
+        val reviewedLicenses = mapOf(
+            "com.google.code.findbugs:jsr305" to "Apache License 2.0",
+            "com.google.dagger:dagger" to "Apache License 2.0",
+            "com.google.j2objc:j2objc-annotations" to "Apache License 2.0",
+            "jakarta.inject:jakarta.inject-api" to "Apache License 2.0",
+            "javax.inject:javax.inject" to "Apache License 2.0",
+            "org.checkerframework:checker-qual" to "MIT License",
+            "org.jspecify:jspecify" to "Apache License 2.0",
+        )
         val dependencies =
             configurations
                 .getByName("releaseRuntimeClasspath")
-                .resolvedConfiguration
-                .resolvedArtifacts
-                .map { artifact ->
-                    val id = artifact.moduleVersion.id
-                    Triple(id.group, artifact.name, id.version)
-                }.distinct()
+                .incoming.artifacts.artifacts
+                .map { it.id.componentIdentifier }
+                .filterIsInstance<ModuleComponentIdentifier>()
+                .map { Triple(it.group, it.module, it.version) }
+                .distinct()
                 .sortedWith(compareBy({ it.first }, { it.second }, { it.third }))
         val unknown =
             dependencies.filter { dependency ->
-                permittedApacheGroups.none { prefix -> dependency.first.startsWith(prefix) }
+                permittedApacheGroups.none { prefix -> dependency.first.startsWith(prefix) } &&
+                    "${dependency.first}:${dependency.second}" !in reviewedLicenses
             }
         check(unknown.isEmpty()) {
             "Review and classify new runtime dependency licenses: " +
@@ -146,10 +160,11 @@ val generateReleaseDependencyLicenses by tasks.registering {
                 appendLine("| Dependency | License |")
                 appendLine("| --- | --- |")
                 dependencies.forEach { (group, name, version) ->
-                    appendLine("| `$group:$name:$version` | Apache License 2.0 |")
+                    val license = reviewedLicenses["$group:$name"] ?: "Apache License 2.0"
+                    appendLine("| `$group:$name:$version` | $license |")
                 }
                 appendLine()
-                appendLine("See `licenses/Apache-2.0.txt` for the complete license text.")
+                appendLine("See `licenses/Apache-2.0.txt` and `licenses/Checker-qual-MIT.txt` for the complete license texts.")
             }
         val destination = outputFile.get().asFile
         destination.parentFile.mkdirs()
@@ -157,7 +172,7 @@ val generateReleaseDependencyLicenses by tasks.registering {
     }
 }
 
-syncOpenSourceNotices {
+syncOpenSourceNotices.configure {
     dependsOn(generateReleaseDependencyLicenses)
     from(generateReleaseDependencyLicenses.map { it.outputs.files.singleFile })
 }
@@ -179,30 +194,27 @@ tasks
     }
 
 dependencies {
-    //noinspection GradleDependency
-    implementation("androidx.core:core-ktx:1.13.1")
-    //noinspection GradleDependency
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    //noinspection GradleDependency
-    implementation("com.google.android.material:material:1.12.0")
-    //noinspection GradleDependency
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.appcompat:appcompat:1.8.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
-    //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // Wireless mode (0.8.0)
     // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
     // 1.3.x triggers Android 15+ "LOAD segment not aligned" warnings.
-    //noinspection GradleDependency
-    implementation("androidx.camera:camera-core:1.4.2")
-    //noinspection GradleDependency
-    implementation("androidx.camera:camera-camera2:1.4.2")
-    //noinspection GradleDependency
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
-    //noinspection GradleDependency
-    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.zxing:core:3.5.4")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.17")
+}
+
+// Robolectric's API 37 permission path uses the JDK FileDescriptor accessor.
+tasks.withType<Test>().configureEach {
+    jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
 }

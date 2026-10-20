@@ -63,3 +63,6 @@ tmp/
 temp/
 *.tmp
 .superpowers/
+
+# Kotlin incremental compilation state
+AndroidClient/.kotlin/
