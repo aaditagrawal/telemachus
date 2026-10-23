@@ -1,0 +1,7 @@
+pysdl2==0.9.17
+# The installer and launchers use pyproject.toml + uv.lock in an isolated venv.
+# NOTE: on some systems pysdl2 also needs the pysdl2-dll package to ship an
+# SDL2 binary. On Zorin OS / Ubuntu prefer the distro library instead:
+#   sudo apt install libsdl2-2.0-0
+# ffmpeg is NOT a pip package; install it from apt (see README.md).
+# Everything else the client uses is Python 3 stdlib.

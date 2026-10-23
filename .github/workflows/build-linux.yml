@@ -1,0 +1,47 @@
+name: Build Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.4"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsdl2-2.0-0
+
+      - name: Test receiver
+        working-directory: LinuxClient
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          uv run --frozen python -m pytest -q
+          uv run --frozen ruff check .
+          uv audit --frozen
+
+      - name: Validate launchers
+        run: |
+          bash -n LinuxClient/scripts/install-linux.sh LinuxClient/telemachus-linux LinuxClient/telemachus-scout

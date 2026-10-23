@@ -48,6 +48,11 @@ build/
 dist/
 *.o
 *.dSYM/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
 
 # Env
 .env

@@ -7,6 +7,10 @@
 Telemachus turns an Android tablet into a low-latency extended display or
 output monitor for macOS.
 
+Linux computers can also receive the Mac stream over LAN or Tailscale.
+See the [Linux client guide](LinuxClient/README.md) for installation, pairing,
+and remote startup.
+
 **Why does this exist?** This exists because I have a Mac Mini running a lot of
 tasks for me on Codex. I wanted a solution that would help me have some device
 attached to it for immediate extended use. I can monitor what it is doing while
@@ -27,7 +31,7 @@ hardware-decoded with MediaCodec on Android.
 
 ## Features
 
-- A real macOS extended desktop using a virtual display
+- Up to four macOS virtual desktops, with one selected for streaming
 - Mirroring of the current main display or an existing Screen Sharing display
 - Automatic USB setup, Android launch, reconnection, and login startup
 - Authenticated wireless pairing through a QR code

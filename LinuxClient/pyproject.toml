@@ -1,0 +1,19 @@
+[project]
+name = "telemachus-linux"
+version = "0.1.0"
+description = "Linux receiver for the Telemachus Mac display host"
+requires-python = ">=3.10"
+dependencies = ["pysdl2>=0.9.17,<0.10"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-subtests>=0.14", "ruff>=0.15"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff.lint]
+select = ["F", "E9"]

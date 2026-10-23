@@ -48,6 +48,7 @@ The first byte is the message type:
 | 0 | Mac to Android | Legacy video frame |
 | 1 | Mac to Android | Display configuration |
 | 2 | Android to Mac | Touch event |
+| 3 | Mac to Android | Server shutdown |
 | 4 | Android to Mac | Ping |
 | 5 | Mac to Android | Pong |
 | 6 | Mac to Android | Video frame with capture metadata |
@@ -55,15 +56,28 @@ The first byte is the message type:
 | 8 | Android to Mac | Client supports frame metadata |
 | 9 | Android to Mac | Client has no HEVC decoder |
 | 10 | Mac to Android | Selected codec |
+| 11 | Android to Mac | Client device info |
+| 12 | Both directions | Device-info capability |
 
-Types 8 and 9 are opt-in capability messages. The host must not send type 10
-unless the client sent type 9, because older clients disconnect on unknown
-server messages.
+Types 8 and 9 are opt-in capability messages. A client that supports frame
+metadata sends type 9 (when it has no HEVC decoder) BEFORE type 8, because
+the host finalizes protocol startup as soon as it sees type 8. The host must
+not send type 10 unless the client sent type 9, because older clients
+disconnect on unknown server messages.
 
-Video and display payload fields use network byte order where the
-implementation writes fixed-width integers. Refer to the codec implementations
-and tests for the exact current field layout. Any protocol change must add a
-cross-platform fixture test and describe old/new mixed-version behavior here.
+Type 12 is a single-byte device-info capability offer: the client sends type
+12, the host answers with type 12, and only then does the client send the
+66-byte type 11 payload (64-byte null-padded UTF-8 model name + 1-byte max
+refresh rate in Hz). A client must NOT reconnect after receiving type 3
+(server shutdown); it closes without attempting to reconnect.
+
+Byte order is split by direction: fixed-width fields in host-to-client
+messages (displayConfig width/height/rotation, and the frame length +
+metadata timestamp) are big-endian/network order, while client-to-host
+touch and ping payloads are little-endian. Refer to the codec
+implementations and tests for the exact current field layout. Any protocol
+change must add a cross-platform fixture test and describe old/new
+mixed-version behavior here.
 
 ## Backpressure and recovery
 
