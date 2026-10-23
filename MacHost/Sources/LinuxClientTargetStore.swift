@@ -30,16 +30,22 @@ final class LinuxClientTargetStore {
     var selectedPeerName: String? {
         get { defaults.string(forKey: peerNameKey) }
         set {
-            if let newValue { defaults.set(newValue, forKey: peerNameKey) }
-            else { defaults.removeObject(forKey: peerNameKey) }
+            if let newValue {
+                defaults.set(newValue, forKey: peerNameKey)
+            } else {
+                defaults.removeObject(forKey: peerNameKey)
+            }
         }
     }
 
     var selectedPeerIP: String? {
         get { defaults.string(forKey: peerIPKey) }
         set {
-            if let newValue { defaults.set(newValue, forKey: peerIPKey) }
-            else { defaults.removeObject(forKey: peerIPKey) }
+            if let newValue {
+                defaults.set(newValue, forKey: peerIPKey)
+            } else {
+                defaults.removeObject(forKey: peerIPKey)
+            }
         }
     }
 
@@ -51,8 +57,11 @@ final class LinuxClientTargetStore {
     var lastResult: String? {
         get { defaults.string(forKey: lastResultKey) }
         set {
-            if let newValue { defaults.set(newValue, forKey: lastResultKey) }
-            else { defaults.removeObject(forKey: lastResultKey) }
+            if let newValue {
+                defaults.set(newValue, forKey: lastResultKey)
+            } else {
+                defaults.removeObject(forKey: lastResultKey)
+            }
         }
     }
 

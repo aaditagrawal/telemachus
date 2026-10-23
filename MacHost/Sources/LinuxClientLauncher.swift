@@ -191,7 +191,7 @@ final class LinuxClientLauncher {
         guard process.terminationStatus == 0 else {
             throw LinuxClientLauncherError.nonZeroExit(
                 status: process.terminationStatus,
-                output: String(decoding: data, as: UTF8.self)
+                output: String(data: data, encoding: .utf8) ?? "SSH output is not valid UTF-8."
             )
         }
         return data
