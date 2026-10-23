@@ -117,7 +117,7 @@ enum TailscaleStatus {
         process.standardOutput = stdout
         // Discard stderr: `tailscale` writes "Tailscale is stopped." there and
         // we only care about the exit status.
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
@@ -139,7 +139,7 @@ enum TailscaleStatus {
             process.terminate()
             return nil
         }
-        _ = readDone.wait(timeout: .now() + timeout)
+        guard readDone.wait(timeout: .now() + timeout) == .success else { return nil }
         guard process.terminationStatus == 0 else { return nil }
         return output
     }

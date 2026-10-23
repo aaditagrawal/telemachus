@@ -22,10 +22,14 @@ raising, so importing this module (and ``--scout``) never hard-crashes.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import queue
+import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,7 +104,6 @@ def systemd_unit_text() -> str:
         "# names its socket differently (GNOME/Wayland uses wayland-0).\n"
         f"Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
         "Environment=XDG_RUNTIME_DIR=%t\n"
-        "Environment=SDL_VIDEODRIVER=wayland\n"
         "Environment=WAYLAND_DISPLAY=wayland-0\n"
         "Environment=DISPLAY=:0\n"
         "\n"
@@ -164,130 +167,142 @@ _KEY_TYPES: frozenset = frozenset(
 )
 
 
-def _extract_key_and_path(args, kwargs):
-    key_names = ("key", "key_text", "public_key", "pubkey", "text",
-                 "value", "input", "line", "mac_key", "mac_public_key")
-    path_names = ("path", "authorized_keys_path", "authorized_keys",
-                  "authorized_keys_file", "file", "dest", "target",
-                  "filename", "authorized_keys_filepath")
-    key = None
-    path = None
-    for name in key_names:
-        if name in kwargs and kwargs[name] is not None:
-            key = kwargs[name]
-            break
-    for name in path_names:
-        if name in kwargs and kwargs[name] is not None:
-            path = kwargs[name]
-            break
-    positional = list(args)
-    if key is None and positional:
-        key = positional.pop(0)
-    if path is None and positional:
-        path = positional.pop(0)
-    return key, path
+def _ssh_field(text: str) -> tuple[str, str]:
+    """Split a field, allowing spaces inside double-quoted SSH options."""
+    quoted = escaped = False
+    for i, char in enumerate(text):
+        if escaped:
+            escaped = False
+        elif quoted and char == "\\":
+            escaped = True
+        elif char == '"':
+            quoted = not quoted
+        elif char in " \t" and not quoted:
+            return text[:i], text[i:].lstrip(" \t")
+    if quoted:
+        raise ValueError("unterminated quote in public key options")
+    return text, ""
 
 
-def _key_blob(text: str) -> str:
-    """Best-effort extraction of the base64 key blob from a key/line."""
-    tokens = str(text).split()
-    # Prefer the token that directly follows a known key type.
-    for i, token in enumerate(tokens):
-        if token in _KEY_TYPES and i + 1 < len(tokens):
-            return tokens[i + 1]
-    # Bare key: "<type> <blob> [comment]".
-    if len(tokens) >= 2 and tokens[0] in _KEY_TYPES:
-        return tokens[1]
-    # Fallback: longest token without '=' or quotes.
-    candidates = [
-        t for t in tokens
-        if len(t) > 20 and "=" not in t and '"' not in t and not t.endswith('"')
-    ]
-    if candidates:
-        return max(candidates, key=len)
-    if len(tokens) >= 2:
-        return tokens[1]
-    return str(text).strip()
-
-
-def _build_authorized_line(key_text: str) -> str:
-    """Wrap a bare public key; pass a full authorized_keys line through."""
-    text = str(key_text).strip()
-    tokens = text.split()
-    if tokens and tokens[0] in _KEY_TYPES:
-        return f'restrict,command="{SSH_SERVICE_COMMAND}" {text}'
-    return text
-
-
-def _is_duplicate(existing: str, key_text: str, line: str) -> bool:
-    if not existing:
-        return False
-    stripped = existing
-    if line.strip() and line.strip() in {ln.strip() for ln in stripped.splitlines()}:
-        return True
-    if key_text.strip() and key_text.strip() in stripped:
-        return True
-    blob = _key_blob(key_text)
-    if blob and blob in stripped:
-        return True
-    blob2 = _key_blob(line)
-    if blob2 and blob2 in stripped:
-        return True
-    return False
-
-
-def authorize_mac(*args, **kwargs) -> Path:
-    """Append a Mac's public key to ``~/.ssh/authorized_keys``.
-
-    Accepts a bare public key (``ssh-ed25519 ...``) or a full
-    authorized_keys line. A bare key is wrapped as
-    ``restrict,command="/usr/bin/systemctl --user start telemachus-linux.service" <key>``.
-    Duplicate keys (by key blob) are skipped. The file is created with mode 600.
-    """
-    key_text, path = _extract_key_and_path(args, kwargs)
-    if key_text is None:
-        raise ValueError("a Mac public key is required")
-    key_text = str(key_text).strip()
-    if not key_text:
-        raise ValueError("a Mac public key is required")
-
-    if path is None:
-        ak_path = authorized_keys_path()
-    else:
-        ak_path = Path(path)
-
-    line = _build_authorized_line(key_text)
-
+def _parse_key_line(text: str) -> tuple[str, str, bytes]:
+    """Return options, the public key text, and its decoded SSH key blob."""
+    if any(ord(char) < 32 and char != "\t" for char in text) or "\x7f" in text:
+        raise ValueError("paste exactly one public key on a single line")
+    text = text.strip()
+    if not text or text.startswith("#"):
+        raise ValueError("a supported SSH public key is required")
+    first, rest = _ssh_field(text)
+    options = ""
+    if first not in _KEY_TYPES:
+        options = first
+        first, rest = _ssh_field(rest)
+    if first not in _KEY_TYPES or not rest:
+        raise ValueError("a supported SSH public key is required")
+    fields = rest.split(None, 1)
+    encoded = fields[0]
     try:
-        existing = ak_path.read_text(encoding="utf-8") if ak_path.exists() else ""
-    except OSError:
+        blob = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("invalid SSH public key encoding") from None
+    # SSH blobs begin with a length-prefixed algorithm name. Reject mismatched
+    # types and truncated/fake blobs instead of accepting arbitrary base64 text.
+    algorithm = first.encode("ascii")
+    header = len(algorithm).to_bytes(4, "big") + algorithm
+    if not blob.startswith(header) or len(blob) <= len(header) + 4:
+        raise ValueError("invalid SSH public key blob")
+    if first == "ssh-ed25519" and (
+        blob[len(header):len(header) + 4] != (32).to_bytes(4, "big")
+        or len(blob) != len(header) + 4 + 32
+    ):
+        raise ValueError("invalid Ed25519 public key blob")
+    comment = " " + fields[1] if len(fields) == 2 else ""
+    return options, f"{first} {encoded}{comment}", blob
+
+
+def _check_key_options(options: str) -> None:
+    """Accept only redundant restrictions and the service command's argv."""
+    restrictions = {
+        "restrict", "no-agent-forwarding", "no-port-forwarding", "no-pty",
+        "no-user-rc", "no-x11-forwarding",
+    }
+    command_seen = False
+    for option in options.split(",") if options else ():
+        if option.lower() in restrictions:
+            continue
+        name, _, value = option.partition("=")
+        if name.lower() == "command" and not command_seen:
+            try:
+                # Decode the authorized_keys double-quoted value, then parse
+                # the shell command it carries. Never execute pasted text.
+                quoted = shlex.split(value)
+                command = shlex.split(quoted[0]) if len(quoted) == 1 else []
+            except ValueError:
+                command = []
+            expected = shlex.split(SSH_SERVICE_COMMAND)
+            with_separator = expected[:-1] + ["--", expected[-1]]
+            if (not value.startswith('"') or not value.endswith('"')
+                    or command not in (expected, with_separator)):
+                raise ValueError("the forced command must start the Telemachus service")
+            command_seen = True
+            continue
+        raise ValueError("unsupported or unsafe public key options")
+
+
+def authorize_mac(key_text: str, *, path: Optional[Path] = None) -> Path:
+    """Authorize one key only to start the service, with forwarding disabled.
+
+    A full authorized_keys line may contain redundant restrictions and the
+    service command, optionally with shell quoting and ``--`` before the unit.
+    Other options are rejected. Matching existing keys
+    are consolidated into the restricted entry; unrelated lines survive.
+    Read failures abort the update. Replacement is atomic and mode 0600 from
+    creation; a newly created parent directory is mode 0700.
+    """
+    options, public_key, blob = _parse_key_line(key_text)
+    _check_key_options(options)
+    line = f'restrict,command="{SSH_SERVICE_COMMAND}" {public_key}\n'
+    ak_path = Path(path) if path is not None else authorized_keys_path()
+    if ak_path.is_symlink():
+        raise ValueError("authorized_keys must not be a symbolic link")
+    try:
+        existing = ak_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         existing = ""
 
-    if _is_duplicate(existing, key_text, line):
+    lines: list[str] = []
+    replaced = False
+    for old_line in existing.splitlines(keepends=True):
         try:
-            ak_path.chmod(_AUTHORIZED_KEYS_MODE)
-        except OSError:
-            pass
-        return ak_path
+            old_options, _, old_blob = _parse_key_line(old_line.rstrip("\r\n"))
+        except ValueError:
+            lines.append(old_line)
+            continue
+        if old_blob != blob:
+            lines.append(old_line)
+            continue
+        # Do not remove pre-existing source restrictions or replace another
+        # forced command without telling the user that the key is already used.
+        _check_key_options(old_options)
+        if not replaced:
+            lines.append(line)
+            replaced = True
+    if not replaced:
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        lines.append(line)
 
-    ak_path.parent.mkdir(parents=True, exist_ok=True)
-    if existing and not existing.endswith("\n"):
-        existing = existing + "\n"
-    ak_path.write_text(existing + line + "\n", encoding="utf-8")
+    ak_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".authorized_keys.", dir=ak_path.parent)
     try:
-        ak_path.chmod(_AUTHORIZED_KEYS_MODE)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), _AUTHORIZED_KEYS_MODE)
+            handle.write("".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, ak_path)
+    finally:
+        Path(tmp_name).unlink(missing_ok=True)
     return ak_path
-
-
-# Aliases for discoverability / compatibility with tests and callers.
-authorize_mac_key = authorize_mac
-authorize_key = authorize_mac
-authorize = authorize_mac
-add_authorized_key = authorize_mac
-add_mac_key = authorize_mac
-authorize_mac_public_key = authorize_mac
 
 
 def save_pairing(uri: str, host: str, path: Optional[Path] = None) -> tuple[str, int]:
@@ -413,13 +428,17 @@ def describe_peer(peer: object) -> str:
 def build_launch_argv(
     *, host: Optional[str] = None, port: Optional[int] = None, qr: Optional[str] = None
 ) -> list[str]:
-    """Command line for the child client (``--qr`` wins over host/port)."""
+    """Build a child command, retaining explicit host/port overrides for QR."""
     argv: list[str] = [PYTHON_BIN, "-m", "telemachus_client"]
-    if qr is not None:
-        return argv + ["--qr", qr]
-    if not host:
+    if not host and qr is None:
         raise ValueError("host is required when no --qr URI is given")
-    return argv + ["--host", host, "--port", str(port if port is not None else DEFAULT_PORT)]
+    if qr is not None:
+        argv += ["--qr", qr]
+    if host:
+        argv += ["--host", host]
+    if port is not None or qr is None:
+        argv += ["--port", str(port if port is not None else DEFAULT_PORT)]
+    return argv
 
 
 def launch_client(
@@ -566,18 +585,24 @@ class ScoutApp:
             self._set_status("The selected peer has no address; refresh and retry.")
             return
         if has_saved_token():
-            self._launch(host=ip, port=self.port)
+            from .config import save_config  # noqa: PLC0415
+
+            note = ""
+            try:
+                save_config({"host": ip, "port": self.port})
+            except (OSError, ValueError):
+                note = " (address not saved; service will use its previous address)"
+            self._launch(host=ip, port=self.port, note=note)
             return
         uri = self._prompt_uri()
         if uri is None:
             return
         try:
             host, port = save_pairing(uri, ip)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError):
             # Persisting failed: still connect, handing the child the URI so
             # this session is paired; nothing is stored for the next one.
-            self._set_status(f"Pairing not saved ({exc}); connecting with --qr.")
-            self._launch(qr=uri)
+            self._launch(host=ip, qr=uri, note=" (pairing not saved)")
             return
         self._launch(host=host, port=port, note=" (paired; token saved)")
 
@@ -663,7 +688,9 @@ class ScoutApp:
                 "Telemachus", f"Could not start the client:\n{exc}", parent=self.root
             )
             return
-        target = qr if qr is not None else f"{host}:{port}"
+        target = host or "the paired host"
+        if port is not None:
+            target += f":{port}"
         self._set_status(f"Launched client for {target}{note}; closing scout.")
         self.root.after(150, self.root.destroy)
 

@@ -260,6 +260,10 @@ class MockTelemachusServer:
             finally:
                 sender_stop.set()
                 sender.join(timeout=5.0)
+        except OSError:
+            # stop() or a newer connection can close this socket while the
+            # handler is setting its timeout or reading a handshake.
+            log.debug("mock session closed", exc_info=True)
         finally:
             with self._conn_lock:
                 if self._conn is conn:

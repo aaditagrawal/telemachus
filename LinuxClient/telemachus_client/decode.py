@@ -28,8 +28,9 @@ import os
 import shutil
 import subprocess
 import threading
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Optional
+from typing import BinaryIO, Callable, Literal, Optional
 
 log = logging.getLogger("telemachus.decode")
 
@@ -64,12 +65,21 @@ def ffmpeg_available() -> bool:
 
 def frame_size_bytes(width: int, height: int, pix_fmt: PixelFormat = "nv12") -> int:
     """Return the raw stdout frame size for *width* x *height*."""
+    if pix_fmt == "nv12":
+        return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
     return int(width * height * BYTES_PER_PIXEL[pix_fmt])
 
 
 def output_dims(width: int, height: int, rotation: int) -> tuple[int, int]:
-    """Return (w, h) of decoded output after the rotation filter."""
-    if rotation in (90, 270):
+    """Return even output dimensions after scaling and rotation.
+
+    NV12 textures need complete 2x2 chroma cells. Custom logical dimensions
+    can be odd, so round up before scaling rather than splitting raw frames
+    at the wrong boundary or using an incompatible texture pitch.
+    """
+    width += width % 2
+    height += height % 2
+    if rotation % 360 in (90, 270):
         return (height, width)
     return (width, height)
 
@@ -97,6 +107,7 @@ def build_ffmpeg_cmd(
     if shutil.which("ffmpeg") is None:
         raise FileNotFoundError("ffmpeg not found on PATH (apt install ffmpeg)")
 
+    width, height = output_dims(width, height, 0)
     codec_flag: str = "hevc" if is_hevc else "h264"
     filt: str = rotation_filter(rotation)
     backend: str = "sw"
@@ -140,11 +151,13 @@ def build_ffmpeg_cmd(
         vf_chain = "scale_vaapi=format=nv12,hwdownload,format=nv12"
         backend = "vaapi"
 
-    # Software decode needs no scale/download chain; rotation (if any) is
-    # the only filter.
+    # The host advertises logical display dimensions, while a HiDPI stream
+    # can contain twice as many coded pixels in each direction. Size the raw
+    # output explicitly before rotating so stdout always matches frame_len.
     filters: list[str] = []
     if vf_chain:
         filters.append(vf_chain)
+    filters.append(f"scale={width}:{height}")
     if filt:
         filters.append(filt)
     # Pixel format conversion when the caller asked for BGRA debug output.
@@ -157,12 +170,16 @@ def build_ffmpeg_cmd(
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
         "-probesize", "32", "-analyzeduration", "0",
         "-fflags", "+flush_packets", "-flags", "low_delay",
+        # Bound frame-thread delay independently of host CPU count. Raw
+        # output needs no encoder frame queue; filters can split one frame
+        # between two workers without queuing future frames.
+        "-threads", "2", "-filter_threads", "2",
     ]
     argv += hw_pre
     argv += ["-f", codec_flag, "-i", "pipe:0"]
     if filters:
         argv += ["-vf", ",".join(filters)]
-    argv += ["-f", "rawvideo", "-pix_fmt", pix_fmt, "pipe:1"]
+    argv += ["-threads", "1", "-f", "rawvideo", "-pix_fmt", pix_fmt, "pipe:1"]
     return argv, backend
 
 
@@ -171,15 +188,29 @@ class DecoderStats:
     fed: int = 0
     decoded: int = 0
     dropped_stale: int = 0
+    dropped_input: int = 0
     restarts: int = 0
 
 
-class FrameDecoder:
-    """Decode Annex-B with ffmpeg; newest-frame slot for the renderer.
+@dataclass
+class _DecoderSession:
+    # Workers retain their own process and stop event across a close/restart.
+    proc: subprocess.Popen[bytes]
+    stop: threading.Event = field(default_factory=threading.Event)
+    dead: threading.Event = field(default_factory=threading.Event)
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    pending: deque[bytes] = field(default_factory=deque)
+    queued_bytes: int = 0
+    waiting_keyframe: bool = True
 
-    :param on_need_keyframe: called (with force=True) when the ffmpeg
-        process dies so the caller can request a fresh keyframe and
-        re-initialise.
+
+class FrameDecoder:
+    """Decode Annex-B with a bounded input queue and newest-frame output.
+
+    ``start`` and ``close`` serialize lifecycle changes. ``feed`` only queues
+    complete access units and never writes to a pipe. After a dropped unit,
+    dependent frames are discarded until a keyframe arrives. The optional
+    ``on_need_keyframe`` callback must return quickly, e.g. set an event.
     """
 
     def __init__(
@@ -192,100 +223,128 @@ class FrameDecoder:
         pix_fmt: PixelFormat = "nv12",
         rotation: int = 0,
         on_need_keyframe: Optional[Callable[[], None]] = None,
+        max_queue_frames: int = 8,
+        max_queue_bytes: int = 10 * 1024 * 1024,
     ) -> None:
-        self.width: int = width
-        self.height: int = height
-        self.is_hevc: bool = is_hevc
-        self.decoder_pref: DecoderPreference = decoder
-        self.render_node: Optional[str] = render_node
-        self.pix_fmt: PixelFormat = pix_fmt
-        self.rotation: int = rotation % 360 if rotation else 0
-        self.on_need_keyframe: Optional[Callable[[], None]] = on_need_keyframe
-
-        self.out_w: int
-        self.out_h: int
+        if max_queue_frames < 1 or max_queue_bytes < 1:
+            raise ValueError("decoder queue limits must be positive")
+        self.width = width
+        self.height = height
+        self.is_hevc = is_hevc
+        self.decoder_pref = decoder
+        self.render_node = render_node
+        self.pix_fmt = pix_fmt
+        self.rotation = rotation % 360
+        self.on_need_keyframe = on_need_keyframe
+        self.max_queue_frames = max_queue_frames
+        self.max_queue_bytes = max_queue_bytes
         self.out_w, self.out_h = output_dims(width, height, self.rotation)
-        self.frame_len: int = frame_size_bytes(self.out_w, self.out_h, pix_fmt)
+        self.frame_len = frame_size_bytes(self.out_w, self.out_h, pix_fmt)
 
+        if decoder == "auto":
+            self._backends: list[DecoderPreference] = (
+                (["vaapi"] if render_node or find_render_nodes() else []) + ["cuda", "sw"]
+            )
+        else:
+            self._backends = [decoder] + (["sw"] if decoder != "sw" else [])
+        self._backend_index = 0
         self.backend: str = "sw"
         self.proc: Optional[subprocess.Popen[bytes]] = None
+        self._session: Optional[_DecoderSession] = None
         self._reader: Optional[threading.Thread] = None
-        self._stop: threading.Event = threading.Event()
-        self._dead: threading.Event = threading.Event()
-
-        self._lock: threading.Lock = threading.Lock()
+        self._writer: Optional[threading.Thread] = None
+        self._lifecycle_lock = threading.Lock()
+        self._lock = threading.Lock()
         self._slot: Optional[bytes] = None
-        self._slot_seq: int = 0
-        self._write_lock: threading.Lock = threading.Lock()
-        self.stats: DecoderStats = DecoderStats()
+        self._slot_seq = 0
+        self.stats = DecoderStats()
 
-    # -- lifecycle ------------------------------------------------------
     def start(self) -> str:
-        """Spawn ffmpeg; return the backend name. Falls back down the chain."""
-        prefs: list[DecoderPreference]
-        if self.decoder_pref == "auto":
-            prefs = ["auto"]
-        else:
-            prefs = [self.decoder_pref]
-        # For "auto" build_ffmpeg_cmd already encodes vaapi->cuda->sw
-        # preference internally; explicit prefs are tried verbatim with a
-        # software fallback so one bad flag never wedges the client.
-        argv, backend = build_ffmpeg_cmd(
-            self.width, self.height, self.is_hevc,
-            self.decoder_pref, self.render_node, self.pix_fmt, self.rotation,
-        )
-        try:
-            self._spawn(argv, backend)
-            return backend
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.warning("decoder backend %s failed to spawn (%s)", backend, exc)
-            if self.decoder_pref != "sw":
-                log.info("falling back to software decode")
-                argv_sw, backend_sw = build_ffmpeg_cmd(
+        """Start or restart ffmpeg, retaining failed-backend progression.
+
+        Hardware initialization happens after Popen, once input arrives.
+        Restarting a dead session advances to the next backend. Software
+        remains the final choice for later restarts of this decoder.
+        """
+        with self._lifecycle_lock:
+            if self._session is not None:
+                if not self.is_dead():
+                    return self.backend
+                self._backend_index = min(self._backend_index + 1, len(self._backends) - 1)
+                self.stats.restarts += 1
+                self._close_locked()
+            while True:
+                pref = self._backends[self._backend_index]
+                argv, backend = build_ffmpeg_cmd(
                     self.width, self.height, self.is_hevc,
-                    "sw", None, self.pix_fmt, self.rotation,
+                    pref, self.render_node, self.pix_fmt, self.rotation,
                 )
-                self._spawn(argv_sw, backend_sw)
-                return backend_sw
-            raise
+                try:
+                    self._spawn(argv, backend)
+                    return backend
+                except (OSError, subprocess.SubprocessError) as exc:
+                    log.warning("decoder backend %s failed to spawn (%s)", backend, exc)
+                    if self._backend_index == len(self._backends) - 1:
+                        raise
+                    self._backend_index += 1
 
     def _spawn(self, argv: list[str], backend: str) -> None:
         log.info("ffmpeg backend=%s cmd=%s", backend, " ".join(argv))
-        self.proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
+        proc = subprocess.Popen(
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, bufsize=0,
         )
+        session = _DecoderSession(proc)
+        self.proc = proc
+        self._session = session
         self.backend = backend
-        self._stop.clear()
-        self._dead.clear()
+        with self._lock:
+            self._slot = None
         self._reader = threading.Thread(
-            target=self._read_loop, name="ffmpeg-stdout", daemon=True
+            target=self._read_loop, args=(session,), name="ffmpeg-stdout", daemon=True,
+        )
+        self._writer = threading.Thread(
+            target=self._write_loop, args=(session,), name="ffmpeg-stdin", daemon=True,
         )
         self._reader.start()
+        self._writer.start()
 
-    def _read_exact(self, n: int) -> Optional[bytes]:
-        assert self.proc is not None and self.proc.stdout is not None
+    @staticmethod
+    def _read_exact(stdout: BinaryIO, n: int, stop: threading.Event) -> Optional[bytes]:
         buf = bytearray()
-        stdout = self.proc.stdout
-        while len(buf) < n and not self._stop.is_set():
+        while len(buf) < n and not stop.is_set():
             try:
-                chunk: bytes = stdout.read(n - len(buf))
+                chunk = stdout.read(n - len(buf))
             except (OSError, ValueError):
                 return None
             if not chunk:
                 return None
             buf += chunk
-        if len(buf) != n:
-            return None
-        return bytes(buf)
+        return bytes(buf) if len(buf) == n else None
 
-    def _read_loop(self) -> None:
-        assert self.proc is not None
-        while not self._stop.is_set():
-            frame: Optional[bytes] = self._read_exact(self.frame_len)
+    def _request_keyframe(self) -> None:
+        if self.on_need_keyframe is not None:
+            try:
+                self.on_need_keyframe()
+            except Exception:
+                log.exception("on_need_keyframe handler raised")
+
+    def _mark_dead(self, session: _DecoderSession) -> None:
+        with session.condition:
+            if session.stop.is_set() or session.dead.is_set():
+                return
+            session.dead.set()
+            session.pending.clear()
+            session.queued_bytes = 0
+            session.condition.notify_all()
+        log.warning("ffmpeg stopped (rc=%s); requesting keyframe + re-init", session.proc.poll())
+        self._request_keyframe()
+
+    def _read_loop(self, session: _DecoderSession) -> None:
+        stdout = session.proc.stdout
+        assert stdout is not None
+        while not session.stop.is_set():
+            frame = self._read_exact(stdout, self.frame_len, session.stop)
             if frame is None:
                 break
             with self._lock:
@@ -294,62 +353,79 @@ class FrameDecoder:
                 self._slot = frame
                 self._slot_seq += 1
                 self.stats.decoded += 1
-        # Reader exited: process died or we are stopping.
-        if not self._stop.is_set():
-            self._dead.set()
-            rc: Optional[int] = self.proc.poll()
-            log.warning("ffmpeg exited (rc=%s); requesting keyframe + re-init", rc)
-            if self.on_need_keyframe is not None:
-                try:
-                    self.on_need_keyframe()
-                except Exception:
-                    log.exception("on_need_keyframe handler raised")
+        self._mark_dead(session)
 
-    # -- network-thread API (never blocks) ------------------------------
-    def feed(self, payload: bytes, is_keyframe: bool = False) -> bool:
-        """Write one Annex-B access unit to ffmpeg stdin. Non-blocking.
-
-        Returns False (and drops the frame) when the decoder is dead or
-        the pipe would block, so the network reader never stalls.
-        """
-        _ = is_keyframe  # informational; ffmpeg parses boundaries itself
-        proc: Optional[subprocess.Popen[bytes]] = self.proc
-        if proc is None or proc.stdin is None or proc.poll() is not None:
-            self._dead.set()
-            return False
-        # Fast liveness check without blocking: poll() above suffices.
-        # Use a short acquisition timeout so a wedged pipe drops the frame
-        # instead of stalling the reader.
-        if not self._write_lock.acquire(blocking=False):
-            return False
+    def _write_loop(self, session: _DecoderSession) -> None:
+        stdin = session.proc.stdin
+        assert stdin is not None
         try:
-            try:
-                proc.stdin.write(payload)
-                proc.stdin.flush()
-            except (BrokenPipeError, OSError, ValueError):
-                self._dead.set()
-                log.warning("ffmpeg stdin broken; requesting keyframe + re-init")
-                if self.on_need_keyframe is not None:
-                    try:
-                        self.on_need_keyframe()
-                    except Exception:
-                        log.exception("on_need_keyframe handler raised")
+            while not session.stop.is_set():
+                with session.condition:
+                    while not session.pending and not session.stop.is_set() and not session.dead.is_set():
+                        session.condition.wait()
+                    if session.stop.is_set() or session.dead.is_set():
+                        return
+                    payload = session.pending.popleft()
+                    session.queued_bytes -= len(payload)
+                # FileIO.write may write fewer bytes than requested. Finish
+                # this entire access unit before starting another one, even
+                # if the queue overflows while this write is in progress.
+                remaining = memoryview(payload)
+                while remaining and not session.stop.is_set():
+                    written = stdin.write(remaining)
+                    if written is None or written <= 0:
+                        raise BrokenPipeError("ffmpeg stdin made no progress")
+                    remaining = remaining[written:]
+                if not remaining:
+                    self.stats.fed += 1
+        except (OSError, ValueError):
+            self._mark_dead(session)
+
+    def feed(self, payload: bytes, is_keyframe: bool = False) -> bool:
+        """Queue an access unit without pipe I/O; return whether accepted.
+
+        Queue overflow drops whole pending units, then waits for a keyframe
+        so the decoder never consumes interframes with missing references.
+        One in-flight unit plus the bounded queue is retained in memory.
+        """
+        session = self._session
+        if session is None or not payload:
+            return False
+        request_keyframe = False
+        with session.condition:
+            if session.stop.is_set() or session.dead.is_set():
                 return False
-            self.stats.fed += 1
-            return True
-        finally:
-            self._write_lock.release()
+            overflow = (
+                len(session.pending) >= self.max_queue_frames
+                or session.queued_bytes + len(payload) > self.max_queue_bytes
+            )
+            if overflow:
+                self.stats.dropped_input += len(session.pending)
+                session.pending.clear()
+                session.queued_bytes = 0
+                request_keyframe = not session.waiting_keyframe
+                session.waiting_keyframe = True
+            accepted = (
+                len(payload) <= self.max_queue_bytes
+                and (is_keyframe or not session.waiting_keyframe)
+            )
+            if accepted:
+                session.waiting_keyframe = False
+                session.pending.append(payload)
+                session.queued_bytes += len(payload)
+                session.condition.notify()
+            else:
+                self.stats.dropped_input += 1
+        if request_keyframe:
+            self._request_keyframe()
+        return accepted
 
     def is_dead(self) -> bool:
-        """Return True when ffmpeg exited or the stdin pipe broke."""
-        if self._dead.is_set():
-            return True
-        if self.proc is not None and self.proc.poll() is not None:
-            self._dead.set()
-            return True
-        return False
+        session = self._session
+        return session is not None and (
+            session.dead.is_set() or session.proc.poll() is not None
+        )
 
-    # -- renderer-thread API --------------------------------------------
     def read_newest(self) -> Optional[bytes]:
         """Take the newest decoded frame, or None when no fresh frame."""
         with self._lock:
@@ -357,28 +433,45 @@ class FrameDecoder:
             return frame
 
     def peek_seq(self) -> int:
-        """Return the decoded-frame sequence counter (for HUD/tests)."""
         with self._lock:
             return self._slot_seq
 
     def close(self) -> None:
-        """Stop the reader thread and terminate ffmpeg."""
-        self._stop.set()
-        proc, self.proc = self.proc, None
-        if proc is not None:
+        """Detach ownership, terminate ffmpeg and stop both pipe workers."""
+        with self._lifecycle_lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
+        session, self._session = self._session, None
+        self.proc = None
+        if session is None:
+            return
+        session.stop.set()
+        with session.condition:
+            session.pending.clear()
+            session.queued_bytes = 0
+            session.condition.notify_all()
+        # Kill the pipe consumer before closing stdin: the writer may be
+        # blocked inside write(), and must be released before joining it.
+        proc = session.proc
+        try:
+            proc.terminate()
+            proc.wait(timeout=0.5)
+        except (subprocess.TimeoutExpired, OSError):
             try:
-                if proc.stdin is not None:
-                    proc.stdin.close()
-            except (OSError, ValueError):
-                pass
-            try:
-                proc.terminate()
-                proc.wait(timeout=2.0)
+                proc.kill()
+                proc.wait(timeout=0.5)
             except (subprocess.TimeoutExpired, OSError):
+                log.warning("ffmpeg did not exit during cleanup")
+        for worker in (self._writer, self._reader):
+            if worker is not None and worker is not threading.current_thread():
+                worker.join(timeout=0.5)
+        self._writer = self._reader = None
+        for pipe in (proc.stdin, proc.stdout):
+            if pipe is not None:
                 try:
-                    proc.kill()
-                except OSError:
+                    pipe.close()
+                except (OSError, ValueError):
                     pass
-        reader, self._reader = self._reader, None
-        if reader is not None and reader is not threading.current_thread():
-            reader.join(timeout=2.0)
+        with self._lock:
+            self._slot = None

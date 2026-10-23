@@ -132,12 +132,15 @@ def load_config(path: Union[Path, str, None] = None) -> Dict[str, Any]:
         return {}
     except OSError as exc:
         raise ValueError(f"cannot read config {cfg_path}: {exc}") from None
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read_string(text)
-    except configparser.MissingSectionHeader:
-        parser = configparser.ConfigParser()
-        parser.read_string("[client]\n" + text)
+        try:
+            parser.read_string(text)
+        except configparser.MissingSectionHeaderError:
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read_string("[client]\n" + text)
+    except configparser.Error as exc:
+        raise ValueError(f"invalid config {cfg_path}: {exc}") from None
     if not parser.has_section("client"):
         return {}
     section = parser["client"]

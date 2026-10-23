@@ -219,6 +219,32 @@ struct SettingsView: View {
                                         .foregroundColor(.secondary.opacity(0.75))
                                 }
 
+                                if settings.displaySource == .extended {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Virtual displays")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Picker("Virtual displays", selection: $settings.virtualDisplayCount) {
+                                            ForEach(1...VirtualDisplayManager.maxDisplayCount, id: \.self) { count in
+                                                Text("\(count)").tag(count)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .pickerStyle(.segmented)
+
+                                        Picker("Stream display", selection: $settings.streamedDisplayIndex) {
+                                            ForEach(0..<settings.virtualDisplayCount, id: \.self) { index in
+                                                Text("Telemachus \(index + 1)").tag(index)
+                                            }
+                                        }
+                                        .font(.system(size: 11))
+
+                                        Text("Creates desktops side by side and streams the selected display. Changing either setting restarts streaming.")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary.opacity(0.75))
+                                    }
+                                }
+
                                 // Resolution
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
@@ -1216,7 +1242,7 @@ struct RotationButton: View {
 // MARK: - Display Settings
 
 class DisplaySettings: ObservableObject {
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let keyPrefix = "Telemachus_"
 
     @Published var resolution: String {
@@ -1278,17 +1304,31 @@ class DisplaySettings: ObservableObject {
     }
     /// Number of virtual displays created in extended mode (1...4).
     @Published var virtualDisplayCount: Int {
-        didSet { save("virtualDisplayCount", virtualDisplayCount) }
+        didSet {
+            let count = VirtualDisplayManager.clampedDisplayCount(virtualDisplayCount)
+            if count != virtualDisplayCount { virtualDisplayCount = count }
+            let index = VirtualDisplayManager.clampedIndex(
+                streamedDisplayIndex, count: virtualDisplayCount
+            ) ?? 0
+            if index != streamedDisplayIndex { streamedDisplayIndex = index }
+            save("virtualDisplayCount", virtualDisplayCount)
+        }
     }
     /// Index of the virtual display that gets streamed (0-based).
     @Published var streamedDisplayIndex: Int {
-        didSet { save("streamedDisplayIndex", streamedDisplayIndex) }
+        didSet {
+            let index = VirtualDisplayManager.clampedIndex(
+                streamedDisplayIndex, count: virtualDisplayCount
+            ) ?? 0
+            if index != streamedDisplayIndex { streamedDisplayIndex = index }
+            save("streamedDisplayIndex", streamedDisplayIndex)
+        }
     }
     /// Selected Linux client target IP for the SSH trigger.
     @Published var linuxTargetIP: String {
         didSet { save("linuxTargetIP", linuxTargetIP) }
     }
-    /// SSH user for the Linux client trigger (default "aditya").
+    /// Explicit SSH username on the Linux host.
     @Published var linuxSSHUser: String {
         didSet { save("linuxSSHUser", linuxSSHUser) }
     }
@@ -1331,7 +1371,8 @@ class DisplaySettings: ObservableObject {
     var onResetWirelessToken: (() -> Bool)?
     var onStartLinuxClient: (() -> Void)?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "2000x1200"
         self.refreshRate = defaults.object(forKey: keyPrefix + "refreshRate") as? Int ?? 60  // Default: 60 — balanced for most tablets. 120 may saturate high-res panel pipelines.
         self.hiDPI = defaults.bool(forKey: keyPrefix + "hiDPI")
@@ -1358,16 +1399,17 @@ class DisplaySettings: ObservableObject {
         self.adbDeviceSerial = defaults.string(
             forKey: keyPrefix + "adbDeviceSerial"
         ) ?? ""
-        self.virtualDisplayCount = VirtualDisplayManager.clampedDisplayCount(
+        let displayCount = VirtualDisplayManager.clampedDisplayCount(
             defaults.object(forKey: keyPrefix + "virtualDisplayCount") as? Int ?? 1
         )
-        self.streamedDisplayIndex = max(
-            0,
-            defaults.object(forKey: keyPrefix + "streamedDisplayIndex") as? Int ?? 0
-        )
+        self.virtualDisplayCount = displayCount
+        self.streamedDisplayIndex = VirtualDisplayManager.clampedIndex(
+            defaults.object(forKey: keyPrefix + "streamedDisplayIndex") as? Int ?? 0,
+            count: displayCount
+        ) ?? 0
 
         self.linuxTargetIP = defaults.string(forKey: keyPrefix + "linuxTargetIP") ?? ""
-        self.linuxSSHUser = defaults.string(forKey: keyPrefix + "linuxSSHUser") ?? "aditya"
+        self.linuxSSHUser = defaults.string(forKey: keyPrefix + "linuxSSHUser") ?? ""
         self.linuxTriggerStatus = defaults.string(forKey: keyPrefix + "linuxTriggerStatus") ?? ""
 
         print("Loaded settings: \(resolution) @ \(refreshRate)Hz, bitrate=\(bitrate), quality=\(quality)")
@@ -1524,7 +1566,7 @@ class DisplaySettings: ObservableObject {
         let keys = ["resolution", "refreshRate", "hiDPI", "bitrate", "quality",
                     "gamingBoost", "port", "rotation", "showAllResolutions",
                     "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "hideDockIcon", "startupMode",
-                    "displaySource", "adbDeviceSerial"]
+                    "displaySource", "adbDeviceSerial", "virtualDisplayCount", "streamedDisplayIndex"]
         for key in keys {
             defaults.removeObject(forKey: keyPrefix + key)
         }
@@ -1546,6 +1588,8 @@ class DisplaySettings: ObservableObject {
         startupMode = .usb
         displaySource = .currentMain
         adbDeviceSerial = ""
+        virtualDisplayCount = 1
+        streamedDisplayIndex = 0
 
         print("Settings reset to defaults")
     }
@@ -1813,7 +1857,7 @@ struct WirelessSection: View {
                         .font(.system(size: 11))
                     }
 
-                    TextField("SSH user", text: $settings.linuxSSHUser)
+                    TextField("SSH user on Linux", text: $settings.linuxSSHUser)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11))
 
@@ -1826,7 +1870,8 @@ struct WirelessSection: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(settings.linuxTargetIP.isEmpty)
+                        .disabled(settings.linuxTargetIP.isEmpty
+                                  || settings.linuxSSHUser.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         if !settings.linuxTriggerStatus.isEmpty {
                             Text(settings.linuxTriggerStatus)
@@ -1974,9 +2019,6 @@ struct WirelessSection: View {
         }
         let name = Host.current().localizedName ?? "Mac"
         let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
-        let pairingURLFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("telemachus-pairing.url")
-        try? url.write(to: pairingURLFile, atomically: true, encoding: .utf8)
         qrImage = QRRenderer.render(url: url, size: 180)
     }
 
@@ -2023,10 +2065,12 @@ struct WirelessSection: View {
     /// Ensures this Mac has an SSH key pair and loads its authorized_keys line.
     private func refreshMacAuthorizedKeysLine() {
         let launcher = LinuxClientLauncher()
-        if !FileManager.default.fileExists(atPath: launcher.keyPath + ".pub") {
-            _ = try? launcher.generateKey()
+        do {
+            macAuthorizedKeysLine = try launcher.generateKey()
+        } catch {
+            macAuthorizedKeysLine = ""
+            settings.linuxTriggerStatus = "Failed to prepare SSH key: \(error.localizedDescription)"
         }
-        macAuthorizedKeysLine = launcher.authorizedKeysLine() ?? ""
     }
 
     private func copyMacAuthorizedKeysLine() {

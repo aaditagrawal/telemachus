@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import Telemachus
 
 final class VirtualDisplayManagerTests: XCTestCase {
@@ -46,5 +47,26 @@ final class VirtualDisplayManagerTests: XCTestCase {
         XCTAssertEqual(manager.selectedIndex, 0)
         XCTAssertTrue(manager.displayIDs.isEmpty)
         XCTAssertNil(manager.displayID)
+    }
+
+    func testArrangementClearsAllExistingPhysicalDisplayBounds() {
+        let origins = VirtualDisplayManager.sideBySideOrigins(
+            widths: [1200, 1200, 1200],
+            otherDisplayBounds: [
+                CGRect(x: 0, y: 0, width: 2560, height: 1440),
+                CGRect(x: 2560, y: -200, width: 1920, height: 1080),
+                CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+            ]
+        )
+
+        XCTAssertEqual(origins, [CGPoint(x: 4480, y: 0), CGPoint(x: 5680, y: 0), CGPoint(x: 6880, y: 0)])
+    }
+
+    func testArrangementUsesEachDisplaysLogicalWidth() {
+        let origins = VirtualDisplayManager.sideBySideOrigins(
+            widths: [1000, 1440, 1200], otherDisplayBounds: []
+        )
+
+        XCTAssertEqual(origins, [CGPoint(x: 0, y: 0), CGPoint(x: 1000, y: 0), CGPoint(x: 2440, y: 0)])
     }
 }

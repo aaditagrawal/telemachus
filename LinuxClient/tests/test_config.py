@@ -127,6 +127,26 @@ class SaveConfigTest(unittest.TestCase):
         self.assertEqual(loaded["host"], "new")
         self.assertEqual(loaded["token"], TOKEN_B64)
 
+    def test_address_update_preserves_sectionless_pairing_and_literal_percent(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text(
+            f"host = old\nport = 54321\ntoken = {TOKEN_B64}\n"
+            "name = 100% Linux\ndecoder = sw\nfullscreen = false\ninput_enabled = on\n",
+            encoding="utf-8",
+        )
+        save_config({"host": "100.64.0.7", "port": 41000}, path=self.path)
+        self.assertEqual(load_config(self.path), {
+            "host": "100.64.0.7", "port": 41000, "token": TOKEN_B64,
+            "name": "100% Linux", "decoder": "sw", "fullscreen": False,
+            "input_enabled": True,
+        })
+
+    def test_malformed_sectionless_config_reports_value_error(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("host = first\nhost = second\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid config"):
+            load_config(self.path)
+
     def test_none_and_blank_remove_keys(self):
         save_config({"host": "h", "token": TOKEN, "decoder": "sw"}, path=self.path)
         save_config({"token": None, "decoder": ""}, path=self.path)

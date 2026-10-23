@@ -5,4 +5,5 @@ set -euo pipefail
 # `$0` would otherwise point at the link, breaking the package import below.
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 cd "$here"
-exec python3 -m telemachus_client.scout
+uv_bin="${UV_BIN:-$(command -v uv || true)}"
+exec "${uv_bin:-$HOME/.local/bin/uv}" run --frozen --no-dev python -m telemachus_client.scout "$@"

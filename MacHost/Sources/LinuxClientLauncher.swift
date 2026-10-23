@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum LinuxClientLauncherError: LocalizedError {
     case timeout
@@ -8,11 +9,11 @@ enum LinuxClientLauncherError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .timeout:
-            return "SSH timed out before the remote command finished."
+            return "SSH command timed out."
         case .nonZeroExit(let status, let output):
             let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return "SSH exited with status \(status)." }
-            return "SSH exited with status \(status): \(trimmed)"
+            if trimmed.isEmpty { return "SSH command exited with status \(status)." }
+            return "SSH command exited with status \(status): \(trimmed)"
         case .launchFailed(let message):
             return message
         }
@@ -29,13 +30,6 @@ final class LinuxClientLauncher {
     private let fileManager: FileManager
     private let keygenPath: String
 
-    private(set) var lastSSHArguments: [String] = []
-
-    var targetPeerName: String = ""
-    var targetPeerIP: String = ""
-    var targetSSHUser: String = ""
-    var targetUnitName: String = defaultUnitName
-
     init(
         sshPath: String = "/usr/bin/ssh",
         keyPath: String? = nil,
@@ -47,258 +41,172 @@ final class LinuxClientLauncher {
         self.sshPath = sshPath
         let base = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/telemachus/ssh", isDirectory: true)
-        self.keyPath = keyPath ?? base.appendingPathComponent("id_ed25519").path
-        self.knownHostsPath = knownHostsPath ?? base.appendingPathComponent("known_hosts").path
+        self.keyPath = ((keyPath ?? base.appendingPathComponent("id_ed25519").path) as NSString)
+            .expandingTildeInPath
+        self.knownHostsPath = ((knownHostsPath ?? base.appendingPathComponent("known_hosts").path) as NSString)
+            .expandingTildeInPath
         self.timeout = timeout
         self.fileManager = fileManager
         self.keygenPath = keygenPath
     }
 
-    convenience init(
-        peerName: String,
+    func sshArguments(
+        peerIP: String,
+        sshUser: String,
+        unitName: String = defaultUnitName
+    ) -> [String] {
+        [
+            "-i", keyPath,
+            "-o", "IdentitiesOnly=yes",
+            "-o", "IdentityAgent=none",
+            "-o", "UserKnownHostsFile=\(knownHostsPath)",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=\(max(1, Int(timeout)))",
+            "--", "\(sshUser)@\(peerIP)",
+            "systemctl --user start -- \(Self.shellQuote(unitName))"
+        ]
+    }
+
+    func launch(
+        peerName: String = "",
         peerIP: String,
         sshUser: String,
         unitName: String = defaultUnitName,
-        sshPath: String = "/usr/bin/ssh",
-        keyPath: String? = nil,
-        knownHostsPath: String? = nil,
-        timeout: TimeInterval = 15,
-        fileManager: FileManager = .default,
-        keygenPath: String = "/usr/bin/ssh-keygen"
+        completion: @escaping (Result<Void, Error>) -> Void
     ) {
-        self.init(sshPath: sshPath, keyPath: keyPath, knownHostsPath: knownHostsPath, timeout: timeout, fileManager: fileManager, keygenPath: keygenPath)
-        self.targetPeerName = peerName
-        self.targetPeerIP = peerIP
-        self.targetSSHUser = sshUser
-        self.targetUnitName = unitName
-    }
-
-    convenience init(
-        peer: TailscalePeer,
-        sshUser: String,
-        unitName: String = defaultUnitName,
-        sshPath: String = "/usr/bin/ssh",
-        keyPath: String? = nil,
-        knownHostsPath: String? = nil,
-        timeout: TimeInterval = 15,
-        fileManager: FileManager = .default,
-        keygenPath: String = "/usr/bin/ssh-keygen"
-    ) {
-        self.init(peerName: peer.name, peerIP: peer.ip, sshUser: sshUser, unitName: unitName, sshPath: sshPath, keyPath: keyPath, knownHostsPath: knownHostsPath, timeout: timeout, fileManager: fileManager, keygenPath: keygenPath)
-    }
-
-    func sshArguments(peerName: String, peerIP: String, sshUser: String, unitName: String = defaultUnitName) -> [String] {
-        buildArguments(ip: peerIP, sshUser: sshUser, unitName: unitName)
-    }
-    func sshArguments(name: String, ip: String, user: String, unit: String = defaultUnitName) -> [String] {
-        buildArguments(ip: ip, sshUser: user, unitName: unit)
-    }
-    func sshArguments(targetName: String, targetIP: String, sshUser: String, unitName: String = defaultUnitName) -> [String] {
-        buildArguments(ip: targetIP, sshUser: sshUser, unitName: unitName)
-    }
-    func sshArguments(peerIP: String, sshUser: String, unitName: String = defaultUnitName) -> [String] {
-        buildArguments(ip: peerIP, sshUser: sshUser, unitName: unitName)
-    }
-    func arguments(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName) -> [String] {
-        buildArguments(ip: peerIP, sshUser: sshUser, unitName: unitName)
-    }
-    func buildCommandArguments(ip: String, sshUser: String, unitName: String = defaultUnitName) -> [String] {
-        buildArguments(ip: ip, sshUser: sshUser, unitName: unitName)
-    }
-
-    private func buildArguments(ip: String, sshUser: String, unitName: String) -> [String] {
-        let expandedKeyPath = (keyPath as NSString).expandingTildeInPath
-        let expandedKnownHostsPath = (knownHostsPath as NSString).expandingTildeInPath
-        let sshDir = (expandedKnownHostsPath as NSString).deletingLastPathComponent
-        try? fileManager.createDirectory(atPath: sshDir, withIntermediateDirectories: true)
-
-        var args: [String] = []
-        if fileManager.fileExists(atPath: expandedKeyPath) {
-            args.append("-i"); args.append(expandedKeyPath)
-        }
-        args.append("-o"); args.append("UserKnownHostsFile=\(expandedKnownHostsPath)")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        args.append("-o"); args.append("BatchMode=yes")
-        args.append("-o"); args.append("ConnectTimeout=\(max(1, Int(timeout)))")
-        args.append("\(sshUser)@\(ip)")
-        args.append("systemctl --user start \(unitName)")
-        return args
-    }
-
-    func launch(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func launch(name: String = "", ip: String, user: String, unit: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: ip, sshUser: user, unitName: unit, completion: completion)
-    }
-    func launch(targetName: String = "", targetIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: targetIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func start(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func start(name: String = "", ip: String, user: String, unit: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: ip, sshUser: user, unitName: unit, completion: completion)
-    }
-    func trigger(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func trigger(name: String = "", ip: String, user: String, unit: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: ip, sshUser: user, unitName: unit, completion: completion)
-    }
-    func run(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func launch(peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Bool) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName) { completion($0.isSuccess) }
-    }
-    func launch(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Bool, String?) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName) { result in
-            switch result { case .success: completion(true, nil); case .failure(let e): completion(false, e.localizedDescription) }
-        }
-    }
-    func launch(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Error?) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName) { result in
-            switch result { case .success: completion(nil); case .failure(let e): completion(e) }
-        }
-    }
-    func launch(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func start(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func trigger(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func run(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func launch(target: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: target.ip, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-
-    func launch(completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: targetPeerIP, sshUser: targetSSHUser, unitName: targetUnitName, completion: completion)
-    }
-    func start(completion: @escaping (Result<Void, Error>) -> Void) {
-        launch(completion: completion)
-    }
-    func trigger(completion: @escaping (Result<Void, Error>) -> Void) {
-        launch(completion: completion)
-    }
-    func run(completion: @escaping (Result<Void, Error>) -> Void) {
-        launch(completion: completion)
-    }
-
-    func launch(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Bool) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName) { completion($0.isSuccess) }
-    }
-    func launch(peer: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Error?) -> Void) {
-        runSSH(ip: peer.ip, sshUser: sshUser, unitName: unitName) { result in
-            switch result { case .success: completion(nil); case .failure(let e): completion(e) }
-        }
-    }
-    func launch(target: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Bool) -> Void) {
-        launch(peer: target, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func launch(target: TailscalePeer, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Error?) -> Void) {
-        launch(peer: target, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-
-    func startLinuxClient(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func triggerLinuxClient(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-    func runLinuxClient(peerName: String = "", peerIP: String, sshUser: String, unitName: String = defaultUnitName, completion: @escaping (Result<Void, Error>) -> Void) {
-        runSSH(ip: peerIP, sshUser: sshUser, unitName: unitName, completion: completion)
-    }
-
-    private func runSSH(ip: String, sshUser: String, unitName: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        let args = buildArguments(ip: ip, sshUser: sshUser, unitName: unitName)
-        lastSSHArguments = args
+        let arguments = sshArguments(peerIP: peerIP, sshUser: sshUser, unitName: unitName)
         DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: self.sshPath)
-            process.arguments = args
-            let stdoutPipe = Pipe(); let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe; process.standardError = stderrPipe
-            do { try process.run() } catch {
-                DispatchQueue.main.async { completion(.failure(LinuxClientLauncherError.launchFailed(error.localizedDescription))) }
-                return
+            let result = Result<Void, Error> {
+                _ = try self.generateKey(unitName: unitName)
+                try self.fileManager.createDirectory(
+                    atPath: (self.knownHostsPath as NSString).deletingLastPathComponent,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                _ = try self.runProcess(self.sshPath, arguments: arguments)
             }
-            let exited = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in exited.signal() }
-            if exited.wait(timeout: .now() + self.timeout) == .timedOut {
-                process.terminate()
-                DispatchQueue.main.async { completion(.failure(LinuxClientLauncherError.timeout)) }
-                return
-            }
-            let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = (String(data: outData, encoding: .utf8) ?? "") + (String(data: errData, encoding: .utf8) ?? "")
-            if process.terminationStatus == 0 {
-                DispatchQueue.main.async { completion(.success(())) }
-            } else {
-                DispatchQueue.main.async { completion(.failure(LinuxClientLauncherError.nonZeroExit(status: process.terminationStatus, output: output))) }
-            }
+            DispatchQueue.main.async { completion(result) }
         }
     }
 
-    func generateKey() throws -> String { try generateKey(unitName: LinuxClientLauncher.defaultUnitName) }
-    func generateKey(unitName: String) throws -> String {
-        let dir = (keyPath as NSString).deletingLastPathComponent
-        try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? fileManager.removeItem(atPath: keyPath)
-        try? fileManager.removeItem(atPath: keyPath + ".pub")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: keygenPath)
-        process.arguments = ["-t", "ed25519", "-f", keyPath, "-N", "", "-C", "telemachus"]
-        let pipe = Pipe()
-        process.standardOutput = pipe; process.standardError = pipe
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            throw LinuxClientLauncherError.launchFailed(String(data: data, encoding: .utf8) ?? "ssh-keygen failed")
+    /// Reuse the dedicated key. If only its public half is missing, derive it
+    /// from the private key so previously installed authorized_keys still work.
+    @discardableResult
+    func generateKey(unitName: String = defaultUnitName) throws -> String {
+        let directory = (keyPath as NSString).deletingLastPathComponent
+        try fileManager.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        if fileManager.fileExists(atPath: keyPath) {
+            if authorizedKeysLine(unitName: unitName) == nil {
+                let publicKey = try runProcess(keygenPath, arguments: ["-y", "-P", "", "-f", keyPath])
+                guard !publicKey.isEmpty else {
+                    throw LinuxClientLauncherError.launchFailed("ssh-keygen returned an empty public key.")
+                }
+                try publicKey.write(to: URL(fileURLWithPath: keyPath + ".pub"), options: .atomic)
+            }
+        } else {
+            guard !fileManager.fileExists(atPath: keyPath + ".pub") else {
+                throw LinuxClientLauncherError.launchFailed(
+                    "The dedicated SSH private key is missing. Restore it before starting the Linux client."
+                )
+            }
+            _ = try runProcess(
+                keygenPath,
+                arguments: ["-t", "ed25519", "-f", keyPath, "-N", "", "-C", "telemachus"]
+            )
         }
-        let pubPath = keyPath + ".pub"
-        let publicKey = (try? String(contentsOfFile: pubPath, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let line = "restrict,command=\"/usr/bin/systemctl --user start \(unitName)\" \(publicKey)"
-        print(line)
+
+        guard let line = authorizedKeysLine(unitName: unitName) else {
+            throw LinuxClientLauncherError.launchFailed("Could not read the dedicated SSH public key.")
+        }
         return line
     }
-    func generateSSHKey() throws -> String { try generateKey() }
-    func generateKeyPair() throws -> String { try generateKey() }
-    func generateKeyPair(unitName: String) throws -> String { try generateKey(unitName: unitName) }
 
     func authorizedKeysLine(unitName: String = defaultUnitName) -> String? {
-        let pubPath = keyPath + ".pub"
-        guard let publicKey = try? String(contentsOfFile: pubPath, encoding: .utf8) else { return nil }
+        guard let publicKey = try? String(contentsOfFile: keyPath + ".pub", encoding: .utf8) else {
+            return nil
+        }
         let trimmed = publicKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return "restrict,command=\"/usr/bin/systemctl --user start \(unitName)\" \(trimmed)"
+        let command = "/usr/bin/systemctl --user start -- \(Self.shellQuote(unitName))"
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "restrict,command=\"\(command)\" \(trimmed)"
     }
-    func printAuthorizedKeysLine(unitName: String = defaultUnitName) {
-        if let line = authorizedKeysLine(unitName: unitName) { print(line) }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
-    var publicKey: String? {
-        guard let s = try? String(contentsOfFile: keyPath + ".pub", encoding: .utf8) else { return nil }
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    static func defaultKeyPath() -> String {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/telemachus/ssh/id_ed25519").path
-    }
-    static func defaultKnownHostsPath() -> String {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/telemachus/ssh/known_hosts").path
+
+    /// Drain combined stdout/stderr while the child runs. Waiting for exit
+    /// before reading can deadlock on a full pipe. Install both handlers first
+    /// so even a process that exits immediately is observed.
+    private func runProcess(_ executable: String, arguments: [String]) throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        let output = ProcessOutput()
+        let readDone = DispatchSemaphore(value: 0)
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                readDone.signal()
+            } else {
+                output.append(data)
+            }
+        }
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        defer {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+        }
+
+        try process.run()
+        try? pipe.fileHandleForWriting.close()
+        let deadline = DispatchTime.now() + timeout
+        if exited.wait(timeout: deadline) == .timedOut {
+            if process.isRunning { process.terminate() }
+            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
+            throw LinuxClientLauncherError.timeout
+        }
+        guard readDone.wait(timeout: deadline) == .success else {
+            throw LinuxClientLauncherError.timeout
+        }
+        let data = output.data
+        guard process.terminationStatus == 0 else {
+            throw LinuxClientLauncherError.nonZeroExit(
+                status: process.terminationStatus,
+                output: String(decoding: data, as: UTF8.self)
+            )
+        }
+        return data
     }
 }
 
-private extension Result {
-    var isSuccess: Bool {
-        if case .success = self { return true }
-        return false
+private final class ProcessOutput {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    func append(_ data: Data) {
+        lock.withLock { storage.append(data) }
+    }
+
+    var data: Data {
+        lock.withLock { storage }
     }
 }

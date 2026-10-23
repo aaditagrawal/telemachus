@@ -44,7 +44,7 @@ final class LinuxClientTargetStore {
     }
 
     var sshUser: String {
-        get { defaults.string(forKey: sshUserKey) ?? "aditya" }
+        get { defaults.string(forKey: sshUserKey) ?? "" }
         set { defaults.set(newValue, forKey: sshUserKey) }
     }
 
@@ -56,57 +56,12 @@ final class LinuxClientTargetStore {
         }
     }
 
-    // MARK: - Aliases (peer name)
-
-    var peerName: String? { get { selectedPeerName } set { selectedPeerName = newValue } }
-    var targetPeerName: String? { get { selectedPeerName } set { selectedPeerName = newValue } }
-    var peer: String? { get { selectedPeerName } set { selectedPeerName = newValue } }
-    var targetName: String? { get { selectedPeerName } set { selectedPeerName = newValue } }
-    var name: String? { get { selectedPeerName } set { selectedPeerName = newValue } }
-
-    // MARK: - Aliases (peer IP)
-
-    var peerIP: String? { get { selectedPeerIP } set { selectedPeerIP = newValue } }
-    var targetPeerIP: String? { get { selectedPeerIP } set { selectedPeerIP = newValue } }
-    var ip: String? { get { selectedPeerIP } set { selectedPeerIP = newValue } }
-    var targetIP: String? { get { selectedPeerIP } set { selectedPeerIP = newValue } }
-    var address: String? { get { selectedPeerIP } set { selectedPeerIP = newValue } }
-
-    // MARK: - Aliases (ssh user)
-
-    var username: String { get { sshUser } set { sshUser = newValue } }
-    var user: String { get { sshUser } set { sshUser = newValue } }
-    var sshUsername: String { get { sshUser } set { sshUser = newValue } }
-
-    // MARK: - Aliases (last result)
-
-    var lastTriggerResult: String? { get { lastResult } set { lastResult = newValue } }
-    var lastStatus: String? { get { lastResult } set { lastResult = newValue } }
-    var lastOutcome: String? { get { lastResult } set { lastResult = newValue } }
-    var triggerStatus: String? { get { lastResult } set { lastResult = newValue } }
-    var status: String? { get { lastResult } set { lastResult = newValue } }
-
     // MARK: - Helpers
-
-    var selectedPeer: (name: String, ip: String)? {
-        get {
-            guard let n = selectedPeerName, let i = selectedPeerIP else { return nil }
-            return (n, i)
-        }
-        set {
-            selectedPeerName = newValue?.name
-            selectedPeerIP = newValue?.ip
-        }
-    }
 
     func select(peerName: String, peerIP: String, sshUser: String? = nil) {
         selectedPeerName = peerName
         selectedPeerIP = peerIP
         if let sshUser { self.sshUser = sshUser }
-    }
-
-    func select(peer: TailscalePeer, sshUser: String? = nil) {
-        select(peerName: peer.name, peerIP: peer.ip, sshUser: sshUser)
     }
 
     func recordResult(_ result: String) {

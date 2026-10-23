@@ -98,6 +98,7 @@ class StreamClient:
 
         self._sock: Optional[socket.socket] = None
         self._send_lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._kf_lock = threading.Lock()
         self._connected = False
         self._closed = False
@@ -133,53 +134,62 @@ class StreamClient:
         Raises :class:`TokenRejectedError` on status 1 and
         :class:`ProtocolError` on statuses 2/3 or any transport failure.
         """
-        if self._connected:
-            raise ProtocolError("already connected")
-        self._closed = False
-        self._graceful_shutdown = False
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        with self._state_lock:
+            if self._closed or self._stop.is_set():
+                raise ProtocolError("client is closed")
+            if self._sock is not None:
+                raise ProtocolError("already connected or connecting")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Publish the connecting socket so close() can interrupt both
+            # TCP connect and the handshake, before _connected becomes true.
+            self._sock = sock
+            self._graceful_shutdown = False
         try:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except OSError:
-            log.debug("TCP_NODELAY unavailable", exc_info=True)
-        sock.settimeout(CONNECT_TIMEOUT_S)
-        try:
-            sock.connect((self._cfg.host, self._cfg.port))
-        except OSError as exc:
-            sock.close()
-            raise ProtocolError(
-                f"cannot reach {self._cfg.host}:{self._cfg.port}: {exc}"
-            ) from exc
-
-        if self._cfg.token:
-            if len(self._cfg.token) != 32:
-                sock.close()
-                raise ProtocolError(
-                    f"token must be 32 bytes, got {len(self._cfg.token)}"
-                )
             try:
-                sock.sendall(encode_handshake(self._cfg.token, self._cfg.name))
-                raw = _recvn(sock, 5)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                log.debug("TCP_NODELAY unavailable", exc_info=True)
+            sock.settimeout(CONNECT_TIMEOUT_S)
+            try:
+                sock.connect((self._cfg.host, self._cfg.port))
             except OSError as exc:
-                sock.close()
-                raise ProtocolError(f"handshake I/O failed: {exc}") from exc
-            status = parse_handshake_response(raw)
-            if status is HandshakeStatus.INVALID_TOKEN:
-                sock.close()
-                raise TokenRejectedError("host rejected the bearer token")
-            if status is not HandshakeStatus.OK:
-                sock.close()
-                raise ProtocolError(f"handshake failed: {status.name}")
+                raise ProtocolError(
+                    f"cannot reach {self._cfg.host}:{self._cfg.port}: {exc}"
+                ) from exc
 
-        sock.settimeout(RECV_TIMEOUT_S)
-        self._sock = sock
-        self._connected = True
-        self._device_info_sent = False
-        self._last_keyframe_mono_ns = None
-        self._stat_bytes = 0
-        self._stat_frames = 0
-        self._stat_start = time.monotonic()
+            if self._cfg.token:
+                if len(self._cfg.token) != 32:
+                    raise ProtocolError(
+                        f"token must be 32 bytes, got {len(self._cfg.token)}"
+                    )
+                try:
+                    sock.sendall(encode_handshake(self._cfg.token, self._cfg.name))
+                    raw = _recvn(sock, 5)
+                except OSError as exc:
+                    raise ProtocolError(f"handshake I/O failed: {exc}") from exc
+                status = parse_handshake_response(raw)
+                if status is HandshakeStatus.INVALID_TOKEN:
+                    raise TokenRejectedError("host rejected the bearer token")
+                if status is not HandshakeStatus.OK:
+                    raise ProtocolError(f"handshake failed: {status.name}")
+
+            sock.settimeout(RECV_TIMEOUT_S)
+            with self._state_lock:
+                if self._closed or self._sock is not sock:
+                    raise ProtocolError("client closed during connect")
+                self._connected = True
+                self._device_info_sent = False
+                self._last_keyframe_mono_ns = None
+                self._ping_since_start = False
+                self._stat_bytes = 0
+                self._stat_frames = 0
+                self._stat_start = time.monotonic()
+        except Exception:
+            with self._state_lock:
+                if self._sock is sock:
+                    self._sock = None
+            sock.close()
+            raise
         self._fire(self._on_state, True)
 
     def send_capabilities(
@@ -358,23 +368,10 @@ class StreamClient:
             log.exception("client callback %r raised", callback)
 
     def _teardown(self) -> None:
-        was_connected = self._connected
-        self._connected = False
-        sock, self._sock = self._sock, None
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
-        if was_connected:
-            self._fire(self._on_state, False)
-
-    def close(self) -> None:
-        """Permanently stop this client: unblock :meth:`run` and wake the
-        supervisor. Idempotent; safe from any thread."""
-        self._closed = True
-        self._stop.set()
-        sock = self._sock
+        with self._state_lock:
+            was_connected = self._connected
+            self._connected = False
+            sock, self._sock = self._sock, None
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
@@ -384,8 +381,19 @@ class StreamClient:
                 sock.close()
             except OSError:
                 pass
-        self._sock = None
-        self._connected = False
+        if was_connected:
+            self._fire(self._on_state, False)
+
+    def close(self) -> None:
+        """Permanently stop this client, including a pending handshake.
+
+        Idempotent and safe from any thread. A close before the supervisor
+        starts must also prevent it from creating a new connection.
+        """
+        with self._state_lock:
+            self._closed = True
+            self._stop.set()
+        self._teardown()
 
     # -- supervision ----------------------------------------------------
 
@@ -398,7 +406,6 @@ class StreamClient:
         fighting a second client and backs off the full 10 s; a session
         living 30 s or more resets the progression.
         """
-        self._stop.clear()
         backoff_idx = 0
         while not self._stop.is_set():
             try:

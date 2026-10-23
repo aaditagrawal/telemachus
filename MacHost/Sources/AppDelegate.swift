@@ -103,7 +103,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionCheckTimer: Timer?
     private var statusRefreshTimer: Timer?
     private var permissionMonitoringReady = false
+    private var isStartingServer = false
+    private var serverStartGeneration = UUID()
+    private var activeServerConfiguration: ServerConfiguration?
     var isDaemonMode = false // Deprecated: keeping variable for ABI compatibility but unused
+
+    private struct ServerConfiguration: Equatable {
+        let resolution: String
+        let connectionMode: ConnectionMode
+        let displaySource: DisplaySourceMode
+        let virtualDisplayCount: Int
+        let streamedDisplayIndex: Int
+
+        init(settings: DisplaySettings) {
+            resolution = settings.resolution
+            connectionMode = settings.connectionMode
+            displaySource = settings.displaySource
+            virtualDisplayCount = displaySource == .extended ? settings.virtualDisplayCount : 1
+            streamedDisplayIndex = displaySource == .extended ? settings.streamedDisplayIndex : 0
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("✅ App launched")
@@ -277,14 +296,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func handleConnectionModeChange(to mode: ConnectionMode) async {
-        debugLog("Connection mode changed to: \(mode.rawValue)")
-        // Disconnect any active client immediately (per spec §6 / fix #2).
-        let wasRunning = settings.isRunning
-        if wasRunning {
-            stopServer()
-        }
-        if mode == .wireless {
+    private func restartServerForSettingsChange() async {
+        // The publisher is delivered after the setters finish, including any
+        // index clamping caused by a count change. Read one consistent snapshot.
+        let configuration = ServerConfiguration(settings: settings)
+        if configuration.connectionMode == .wireless {
             // Generate token if missing; the QR will reflect it.
             do {
                 _ = try WirelessAuth.loadOrCreate()
@@ -294,9 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 debugLog("Could not prepare wireless token: \(error.localizedDescription)")
             }
         }
-        if wasRunning {
-            await startServer()
-        }
+        guard settings.isRunning || isStartingServer,
+              configuration != activeServerConfiguration else { return }
+        stopServer()
+        await startServer()
     }
 
     /// Check permissions on demand (called when settings window opens or manually)
@@ -310,8 +327,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Observer cho gaming boost changes
         settings.$gamingBoost
             .dropFirst() // Skip initial value
-            .sink { [weak self] gamingBoost in
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 guard let self = self, self.settings.isRunning else { return }
+                let gamingBoost = self.settings.gamingBoost
                 print("🎮 Gaming Boost \(gamingBoost ? "ENABLED" : "DISABLED")")
                 self.screenCapture?.updateEncoderSettings(
                     bitrateMbps: self.settings.effectiveBitrate,
@@ -324,8 +343,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Observer cho bitrate/quality changes (chỉ khi không gaming boost)
         Publishers.CombineLatest(settings.$bitrate, settings.$quality)
             .dropFirst()
-            .sink { [weak self] bitrate, quality in
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 guard let self = self, self.settings.isRunning, !self.settings.gamingBoost else { return }
+                let bitrate = self.settings.bitrate
+                let quality = self.settings.quality
                 print("⚙️ Settings updated: \(bitrate)Mbps, \(quality)")
                 self.screenCapture?.updateEncoderSettings(
                     bitrateMbps: bitrate,
@@ -354,78 +376,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // Observer cho connection mode changes — restart server with new auth/ADB policy.
-        settings.$connectionMode
-            .dropFirst()
-            .sink { [weak self] mode in
-                guard let self = self else { return }
-                Task { @MainActor in
-                    await self.handleConnectionModeChange(to: mode)
-                }
+        // @Published emits in willSet. Coalesce related setters (count/index,
+        // Reset) on main before rebuilding, then use the committed settings.
+        Publishers.MergeMany([
+            settings.$connectionMode.dropFirst().map { _ in }.eraseToAnyPublisher(),
+            settings.$resolution.dropFirst().map { _ in }.eraseToAnyPublisher(),
+            settings.$displaySource.dropFirst().map { _ in }.eraseToAnyPublisher(),
+            settings.$virtualDisplayCount.dropFirst().map { _ in }.eraseToAnyPublisher(),
+            settings.$streamedDisplayIndex.dropFirst().map { _ in }.eraseToAnyPublisher()
+        ])
+        .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
+        .sink { [weak self] in
+            Task { @MainActor in
+                await self?.restartServerForSettingsChange()
             }
-            .store(in: &cancellables)
-
-        // Observer cho resolution changes — the virtual display is created at
-        // server start, so a new resolution (list row or custom Apply) needs a
-        // stop/start cycle to take effect, same as a connection-mode change.
-        // Without this, changing resolution mid-run silently did nothing.
-        settings.$resolution
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] resolution in
-                guard let self = self else { return }
-                Task { @MainActor in
-                    guard self.settings.isRunning else { return }
-                    debugLog("Resolution changed to \(resolution) — restarting server to rebuild virtual display")
-                    self.stopServer()
-                    await self.startServer()
-                }
-            }
-            .store(in: &cancellables)
-
-        settings.$displaySource
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] source in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.settings.isRunning else { return }
-                    debugLog("Display source changed to \(source.rawValue) — restarting capture")
-                    self.stopServer()
-                    await self.startServer()
-                }
-            }
-            .store(in: &cancellables)
-
-        // Multi-display settings are applied when the virtual displays are built,
-        // so both need a stop/start cycle to take effect mid-run.
-        settings.$virtualDisplayCount
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] count in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.settings.isRunning else { return }
-                    debugLog("Virtual display count changed to \(count) — restarting server to rebuild displays")
-                    self.stopServer()
-                    await self.startServer()
-                }
-            }
-            .store(in: &cancellables)
-
-        settings.$streamedDisplayIndex
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] index in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.settings.isRunning else { return }
-                    debugLog("Streamed display index changed to \(index) — restarting server")
-                    self.stopServer()
-                    await self.startServer()
-                }
-            }
-            .store(in: &cancellables)
+        }
+        .store(in: &cancellables)
 
         settings.$hideDockIcon
             .dropFirst()
@@ -783,9 +749,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     func triggerLinuxClient() async {
+        let ip = settings.linuxTargetIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ip.isEmpty else {
+            settings.linuxTriggerStatus = "Failed: no peer selected"
+            return
+        }
+        let user = settings.linuxSSHUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !user.isEmpty else {
+            settings.linuxTriggerStatus = "Failed: enter the SSH username on the Linux host"
+            return
+        }
+
         // Ensure we are in wireless mode with the server running before triggering.
         if settings.connectionMode != .wireless {
             settings.connectionMode = .wireless
+            if settings.isRunning || isStartingServer {
+                stopServer()
+            }
         }
         if !settings.isRunning || !isServerListening(port: settings.port) {
             if settings.isRunning {
@@ -800,18 +780,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if !isServerListening(port: settings.port) {
-            settings.linuxTriggerStatus = "Failed: Mac server not listening on port \\(settings.port) (check Screen Recording permission)"
+            settings.linuxTriggerStatus = "Failed: Mac server not listening on port \(settings.port) (check Screen Recording permission)"
             return
         }
 
-        let ip = settings.linuxTargetIP
-        guard !ip.isEmpty else {
-            settings.linuxTriggerStatus = "Failed: no peer selected"
-            return
-        }
-
-        let user = settings.linuxSSHUser.isEmpty ? "aditya" : settings.linuxSSHUser
-        let unit = "telemachus-linux.service"
+        let unit = LinuxClientLauncher.defaultUnitName
 
         // Resolve peer name from target store or Tailscale peers.
         let name = linuxClientTargetStore.selectedPeerName
@@ -834,12 +807,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @MainActor
     func startServer() async {
+        // Main-actor isolation alone does not prevent reentrancy across awaits.
+        guard !settings.isRunning, !isStartingServer else { return }
         debugLog("🚀 startServer() invoked. Check permission: \(settings.hasScreenRecordingPermission)")
         guard settings.hasScreenRecordingPermission else {
             debugLog("❌ startServer aborted: Missing Screen Recording permission")
-            await showPermissionAlert()
+            showPermissionAlert()
             return
+        }
+
+        isStartingServer = true
+        let generation = UUID()
+        serverStartGeneration = generation
+        let configuration = ServerConfiguration(settings: settings)
+        activeServerConfiguration = configuration
+        var captureForAttempt: ScreenCapture?
+        defer {
+            if serverStartGeneration == generation {
+                isStartingServer = false
+            }
         }
 
         do {
@@ -847,12 +835,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let captureDisplayID: CGDirectDisplayID
             let streamSize: (width: Int, height: Int)
 
-            switch settings.displaySource {
+            switch configuration.displaySource {
             case .extended:
                 let manager = VirtualDisplayManager()
                 virtualDisplayManager = manager
                 try manager.createDisplays(
-                    count: settings.virtualDisplayCount,
+                    count: configuration.virtualDisplayCount,
                     width: size.width,
                     height: size.height,
                     refreshRate: settings.refreshRate,
@@ -861,7 +849,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
 
                 // Stream the display the user selected (clamped inside the manager).
-                manager.selectedIndex = settings.streamedDisplayIndex
+                manager.selectedIndex = configuration.streamedDisplayIndex
 
                 // Disable mirror mode on the selected display (may fail if already
                 // in extend mode).
@@ -889,20 +877,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             activeDisplayID = captureDisplayID
 
-            await MainActor.run {
-                settings.displayCreated = true
-            }
+            settings.displayCreated = true
 
             // Run ADB setup (USB only) and display init wait in parallel.
             // For wireless mode, skip ADB entirely — the auth handshake gates LAN connections instead.
-            await withTaskGroup(of: Void.self) { group in
-                if settings.connectionMode == .usb {
-                    group.addTask { await self.setupADBReverse() }
-                } else {
-                    debugLog("Wireless mode: skipping ADB setup")
-                }
-                group.addTask { try? await Task.sleep(nanoseconds: 500_000_000) }
-            }
+            await prepareDisplayForCapture(connectionMode: configuration.connectionMode)
+            guard serverStartGeneration == generation else { return }
 
             if let vdm = virtualDisplayManager {
                 vdm.restoreDisplayPosition()
@@ -913,32 +893,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // Setup capture
-            screenCapture = try await ScreenCapture()
+            let capture = try await ScreenCapture()
+            captureForAttempt = capture
+            guard serverStartGeneration == generation else {
+                capture.stopStreaming()
+                return
+            }
+            screenCapture = capture
             screenCapture?.onCaptureMethodChanged = { [weak self] method in
                 guard let self = self else { return }
                 debugLog("Capture method: \(method)")
                 Task { @MainActor in
+                    guard self.serverStartGeneration == generation else { return }
                     self.settings.captureMethod = method
                 }
             }
             screenCapture?.onDisplayIDChanged = { [weak self] displayID in
                 guard let appDelegate = self else { return }
                 Task { @MainActor in
+                    guard appDelegate.serverStartGeneration == generation else { return }
                     appDelegate.activeDisplayID = displayID
                 }
             }
-            let existingDisplayOutput = settings.displaySource == .currentMain ? streamSize : nil
-            try await screenCapture?.setupForDisplay(
+            let existingDisplayOutput = configuration.displaySource == .currentMain ? streamSize : nil
+            try await capture.setupForDisplay(
                 captureDisplayID,
                 refreshRate: settings.effectiveRefreshRate,
                 outputSize: existingDisplayOutput,
-                followsMainDisplay: settings.displaySource == .currentMain
+                followsMainDisplay: configuration.displaySource == .currentMain
             )
+            guard serverStartGeneration == generation else {
+                capture.stopStreaming()
+                return
+            }
 
             // Setup server. USB is loopback-only; wireless authenticates every
             // candidate before it can replace the active client.
             let serverMode: StreamingServerMode
-            if settings.connectionMode == .wireless {
+            if configuration.connectionMode == .wireless {
                 serverMode = .wireless(
                     authToken: try WirelessAuth.loadOrCreate()
                 )
@@ -946,15 +938,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 serverMode = .usb
             }
-            streamingServer = StreamingServer(
+            let server = StreamingServer(
                 port: settings.port,
                 mode: serverMode
             )
+            streamingServer = server
             streamingServer?.touchEnabled = settings.touchEnabled
-            if settings.connectionMode == .wireless {
+            if configuration.connectionMode == .wireless {
                 streamingServer?.onWirelessClientPaired = { [weak self] deviceName in
                     guard let self = self else { return }
                     Task { @MainActor in
+                        guard self.serverStartGeneration == generation else { return }
                         self.currentWirelessDevice = deviceName
                         self.settings.currentWirelessDevice = deviceName
                         self.pairedDeviceStore.upsert(name: deviceName, lastConnected: Date())
@@ -968,10 +962,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // match the Mac's resolution dropdown (e.g. "2560x1600" instead of
             // the HiDPI-doubled "5120x3200").
             streamingServer?.setDisplaySize(width: streamSize.width, height: streamSize.height, rotation: settings.rotation)
-            streamingServer?.onClientConnected = { [weak self] in
+            streamingServer?.onClientConnected = { [weak self, weak capture] in
                 guard let self = self else { return }
-                self.screenCapture?.requestKeyframeOrReplayCachedFrame(force: true)
+                capture?.requestKeyframeOrReplayCachedFrame(force: true)
                 Task { @MainActor in
+                    guard self.serverStartGeneration == generation else { return }
                     // Clear before the new client's type-11 arrives so a
                     // takeover never leaves the previous tablet's model/Hz up.
                     self.settings.connectedDeviceModel = nil
@@ -982,12 +977,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Runs synchronously on the server's network queue BEFORE the
             // display config is sent, so the config below carries the right
             // dimensions for the negotiated codec.
-            streamingServer?.onCodecNegotiated = { [weak self] codec in
-                guard let self = self, let capture = self.screenCapture else { return }
+            streamingServer?.onCodecNegotiated = { [weak self, weak capture, weak server] codec in
+                guard let self, let capture, let server else { return }
                 capture.setCodec(codec)
                 switch codec {
                 case .hevc:
-                    self.streamingServer?.setDisplaySize(
+                    server.setDisplaySize(
                         width: streamSize.width,
                         height: streamSize.height,
                         rotation: self.settings.rotation
@@ -997,16 +992,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // its (weak) AVC decoder within its supported range, and
                     // this matches what the stream's SPS will carry.
                     let enc = capture.encodeSize(for: .h264)
-                    self.streamingServer?.setDisplaySize(width: enc.width, height: enc.height, rotation: self.settings.rotation)
+                    server.setDisplaySize(width: enc.width, height: enc.height, rotation: self.settings.rotation)
                 }
             }
-            streamingServer?.onKeyframeRequested = { [weak self] force in
-                self?.screenCapture?.requestKeyframeOrReplayCachedFrame(force: force)
+            streamingServer?.onKeyframeRequested = { [weak capture] force in
+                capture?.requestKeyframeOrReplayCachedFrame(force: force)
             }
 
             streamingServer?.onClientDisconnected = { [weak self] in
                 guard let self = self else { return }
                 Task { @MainActor in
+                    guard self.serverStartGeneration == generation else { return }
                     self.settings.clientConnected = false
                     self.settings.connectedDeviceModel = nil
                     self.settings.connectedDeviceMaxRefreshRate = nil
@@ -1024,6 +1020,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             streamingServer?.onDeviceInfoReceived = { [weak self] model, refreshRate in
                 guard let self = self else { return }
                 Task { @MainActor in
+                    guard self.serverStartGeneration == generation else { return }
                     self.settings.connectedDeviceModel = model
                     self.settings.connectedDeviceMaxRefreshRate = Int(refreshRate)
                     debugLog("Device info: \(model), \(refreshRate)Hz")
@@ -1037,6 +1034,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             streamingServer?.onStats = { [weak self] fps, mbps in
                 let captured = self
                 Task { @MainActor in
+                    guard captured?.serverStartGeneration == generation else { return }
                     captured?.settings.currentFPS = fps
                     captured?.settings.currentBitrate = mbps
                 }
@@ -1044,40 +1042,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             streamingServer?.onServerFailed = { [weak self] error in
                 debugLog("Streaming listener stopped: \(error.localizedDescription)")
-                self?.performSelector(
-                    onMainThread: #selector(AppDelegate.handleServerFailure),
-                    with: nil,
-                    waitUntilDone: false
-                )
+                Task { @MainActor in
+                    guard let self, self.serverStartGeneration == generation else { return }
+                    self.handleServerFailure()
+                }
             }
 
-            try streamingServer?.start()
-            try await screenCapture?.startStreaming(
-                to: streamingServer,
+            try server.start()
+            try await capture.startStreaming(
+                to: server,
                 bitrateMbps: settings.effectiveBitrate,
                 quality: settings.effectiveQuality,
                 gamingBoost: settings.gamingBoost,
                 frameRate: settings.effectiveRefreshRate
             )
-
-            await MainActor.run {
-                settings.isRunning = true
+            guard serverStartGeneration == generation else {
+                capture.stopStreaming()
+                server.stop()
+                return
             }
+            settings.isRunning = true
 
             print("✅ Server started on port \(settings.port)")
         } catch {
-            print("❌ Failed to start: \(error)")
-            await MainActor.run {
-                teardownStreamingComponents()
-                settings.isRunning = false
-                settings.displayCreated = false
-
-                let alert = NSAlert()
-                alert.messageText = "Failed to Start Server"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .critical
-                alert.runModal()
+            guard serverStartGeneration == generation else {
+                captureForAttempt?.stopStreaming()
+                return
             }
+            print("❌ Failed to start: \(error)")
+            stopServer()
+
+            let alert = NSAlert()
+            alert.messageText = "Failed to Start Server"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .critical
+            alert.runModal()
+        }
+    }
+
+    @MainActor
+    func prepareDisplayForCapture(connectionMode: ConnectionMode) async {
+        await withTaskGroup(of: Void.self) { group in
+            if connectionMode == .usb {
+                group.addTask { await self.setupADBReverse() }
+            } else {
+                debugLog("Wireless mode: skipping ADB setup")
+            }
+            group.addTask { try? await Task.sleep(nanoseconds: 500_000_000) }
         }
     }
 
@@ -1093,8 +1104,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activeDisplayID = nil
     }
 
-    @objc private func handleServerFailure() {
-        guard settings.isRunning else { return }
+    private func handleServerFailure() {
+        guard settings.isRunning || isStartingServer else { return }
         stopServer()
     }
 
@@ -1122,6 +1133,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func stopServer() {
+        // Invalidate suspended startup attempts before tearing down their state.
+        serverStartGeneration = UUID()
+        isStartingServer = false
+        activeServerConfiguration = nil
         // Save display position before destroying
         virtualDisplayManager?.saveDisplayPosition()
 
@@ -1132,6 +1147,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.clientConnected = false
         settings.connectedDeviceModel = nil
         settings.connectedDeviceMaxRefreshRate = nil
+        if let name = currentWirelessDevice {
+            pairedDeviceStore.upsert(name: name, lastConnected: Date())
+        }
+        currentWirelessDevice = nil
+        settings.currentWirelessDevice = nil
         settings.currentFPS = 0
         settings.currentBitrate = 0
 

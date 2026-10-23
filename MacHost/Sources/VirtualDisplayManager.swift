@@ -201,39 +201,61 @@ class VirtualDisplayManager {
         )
     }
 
-    /// Lay the managed displays out left-to-right at y = 0, one display width apart.
+    /// Place the group to the right of existing desktops, in logical coordinates.
     /// Arrangement is best-effort: a failure leaves the displays usable and
     /// recoverable with `setDisplayPosition`.
     private func arrangeSideBySide(width: Int) {
         guard displayIDs.count > 1 else { return }
 
-        var config: CGDisplayConfigRef?
-        guard CGBeginDisplayConfiguration(&config) == .success, let config = config else {
-            debugLog("⚠️  Could not begin display configuration for arrangement")
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success else {
+            debugLog("⚠️  Could not read active displays for arrangement")
             return
         }
+        var activeDisplays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &activeDisplays, &displayCount) == .success else {
+            debugLog("⚠️  Could not read active display bounds for arrangement")
+            return
+        }
+        let managedIDs = Set(displayIDs)
+        let otherBounds = activeDisplays.prefix(Int(displayCount))
+            .filter { !managedIDs.contains($0) }
+            .map { CGDisplayBounds($0) }
+        let widths = displayIDs.map { id in
+            let logicalWidth = CGDisplayBounds(id).width
+            return logicalWidth > 0 ? logicalWidth : CGFloat(width)
+        }
+        do {
+            try setDisplayPositions(Self.sideBySideOrigins(widths: widths, otherDisplayBounds: otherBounds))
+            print("📍 \(displayIDs.count) virtual displays arranged side-by-side")
+        } catch {
+            debugLog("⚠️  Could not complete display arrangement: \(error)")
+        }
+    }
 
-        for (index, id) in displayIDs.enumerated() where index > 0 {
-            let originResult = CGConfigureDisplayOrigin(
-                config,
-                id,
-                Int32(clamping: index * width),
-                0
-            )
-            if originResult != .success {
+    static func sideBySideOrigins(widths: [CGFloat], otherDisplayBounds: [CGRect]) -> [CGPoint] {
+        var x = max(0, otherDisplayBounds.map(\.maxX).max() ?? 0)
+        return widths.map { width in
+            let origin = CGPoint(x: x, y: 0)
+            x += width
+            return origin
+        }
+    }
+
+    private func setDisplayPositions(_ origins: [CGPoint]) throws {
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success, let config else {
+            throw VirtualDisplayError.configurationFailed("Failed to begin display arrangement")
+        }
+        for (id, origin) in zip(displayIDs, origins) {
+            let result = CGConfigureDisplayOrigin(config, id, Int32(origin.x), Int32(origin.y))
+            guard result == .success else {
                 CGCancelDisplayConfiguration(config)
-                debugLog(
-                    "⚠️  Could not position display \(id) at x=\(index * width): \(originResult)"
-                )
-                return
+                throw VirtualDisplayError.configurationFailed("Failed to position display \(id): \(result)")
             }
         }
-
-        let completeResult = CGCompleteDisplayConfiguration(config, .forSession)
-        if completeResult != .success {
-            debugLog("⚠️  Could not complete display arrangement: \(completeResult)")
-        } else {
-            print("📍 \(displayIDs.count) virtual displays arranged side-by-side")
+        guard CGCompleteDisplayConfiguration(config, .forSession) == .success else {
+            throw VirtualDisplayError.configurationFailed("Failed to complete display arrangement")
         }
     }
 
@@ -391,9 +413,10 @@ class VirtualDisplayManager {
         print("📍 Display position set to (\(x), \(y))")
     }
 
-    /// Save the selected display's position to UserDefaults
+    /// Save the group's first display as its anchor, independent of stream selection.
     func saveDisplayPosition() {
-        guard let position = getDisplayPosition() else { return }
+        guard let firstDisplayID = displayIDs.first else { return }
+        let position = CGDisplayBounds(firstDisplayID).origin
         let defaults = UserDefaults.standard
         defaults.set(Int(position.x), forKey: "Telemachus_positionX")
         defaults.set(Int(position.y), forKey: "Telemachus_positionY")
@@ -401,7 +424,7 @@ class VirtualDisplayManager {
         print("💾 Saved display position: (\(Int(position.x)), \(Int(position.y)))")
     }
 
-    /// Restore saved display position on the selected display
+    /// Restore the group together so selecting another stream cannot overlap its neighbors.
     func restoreDisplayPosition() {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "Telemachus_hasPosition") else {
@@ -413,7 +436,15 @@ class VirtualDisplayManager {
         let y = defaults.integer(forKey: "Telemachus_positionY")
 
         do {
-            try setDisplayPosition(x: Int32(x), y: Int32(y))
+            if displayIDs.count > 1 {
+                let widths = displayIDs.map { CGDisplayBounds($0).width }
+                let origins = Self.sideBySideOrigins(widths: widths, otherDisplayBounds: []).map {
+                    CGPoint(x: $0.x + CGFloat(x), y: CGFloat(y))
+                }
+                try setDisplayPositions(origins)
+            } else {
+                try setDisplayPosition(x: Int32(x), y: Int32(y))
+            }
             print("📍 Restored display position: (\(x), \(y))")
         } catch {
             print("⚠️  Failed to restore display position: \(error)")

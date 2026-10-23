@@ -47,17 +47,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--token-b64url", default=None,
                    help="32-byte bearer token, base64url (no padding required)")
     p.add_argument("--name", default=None, help="client device name")
-    p.add_argument("--decoder", default="auto", choices=["auto", "vaapi", "cuda", "sw"],
+    p.add_argument("--decoder", default=None, choices=["auto", "vaapi", "cuda", "sw"],
                    help="ffmpeg acceleration path (default auto: vaapi -> cuda -> sw)")
     p.add_argument("--display", default=None,
                    help="target monitor: index (e.g. 1), name substring (e.g. HP), "
                         "or WxH@Hz (e.g. 1920x1080@60). Default: the 1920x1080@60 display.")
     g = p.add_mutually_exclusive_group()
-    g.add_argument("--fullscreen", dest="fullscreen", action="store_true", default=True,
+    g.add_argument("--fullscreen", dest="fullscreen", action="store_true", default=None,
                    help="fullscreen on the target monitor (default)")
     g.add_argument("--windowed", dest="fullscreen", action="store_false",
                    help="run in a window instead of fullscreen")
-    p.add_argument("--no-input", action="store_true",
+    p.add_argument("--no-input", action="store_true", default=None,
                    help="do not forward mouse as touch")
     p.add_argument("--hud", action="store_true",
                    help="show fps / Mbps / RTT overlay (toggle at runtime with F1)")
@@ -153,19 +153,6 @@ def resolve_config(args: argparse.Namespace) -> ResolvedConfig:
         # Note: do NOT adopt the QR's name (q_name) as this client's device
         # name; the client's name is --name if given, else the local hostname.
 
-    # --fullscreen defaults True (and --no-input defaults False), so argparse
-    # cannot tell "unset" from explicit; preserve the historical rule that an
-    # explicit file value wins in that case.
-    fullscreen: bool = args.fullscreen
-    if "fullscreen" in file_cfg and not _cli_flag_set("fullscreen", args):
-        fullscreen = bool(file_cfg["fullscreen"])
-    input_enabled: bool = not args.no_input
-    if "input_enabled" in file_cfg and args.no_input is False:
-        # --no-input defaults False so an absent flag cannot override the file;
-        # only honour the file when the flag was not passed. (argparse gives
-        # no direct "was passed" signal; _cli_flag_set is best-effort.)
-        input_enabled = bool(file_cfg["input_enabled"])
-
     # Route through the frozen build_config(), which owns validation (port
     # range, token length, name truncation to <=64 UTF-8 bytes). It accepts a
     # Namespace or a Mapping; pass a mapping keyed with its exact field names
@@ -179,8 +166,8 @@ def resolve_config(args: argparse.Namespace) -> ResolvedConfig:
         "name": name,
         "decoder": args.decoder,
         "display": args.display,
-        "fullscreen": fullscreen,
-        "input_enabled": input_enabled,
+        "fullscreen": args.fullscreen,
+        "input_enabled": False if args.no_input else None,
     }
     built = build_config(cli, file_cfg)
     return ResolvedConfig(
@@ -220,16 +207,6 @@ def _persist_pairing(cfg: ResolvedConfig) -> None:
         log.warning("could not save the pairing to the config file: %s", exc)
         return
     log.info("pairing saved to %s (later runs need no --qr)", path)
-
-
-def _cli_flag_set(_flag: str, _args: argparse.Namespace) -> bool:
-    """Best-effort 'was this flag passed' check (no sys.argv scan needed).
-
-    --fullscreen defaults True so an unset flag is indistinguishable from an
-    explicit one; callers treat CLI as authoritative and only consult the
-    file when it carries a value. Returns False here to keep that simple.
-    """
-    return False
 
 
 # -- Tailscale discovery ------------------------------------------------------
@@ -442,13 +419,14 @@ class _StreamState:
         self.connected: bool = False
         self.shutdown: bool = False
         self.frames_seen: int = 0
+        self.generation: int = 0
 
 
 def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     """Connect to the Mac host and run the decode/display loop."""
     try:
         from telemachus_client import decode as decode_mod  # noqa: PLC0415
-        from telemachus_client.display import SdlDisplay  # noqa: PLC0415
+        from telemachus_client.display import SdlDisplay, inverse_rotation  # noqa: PLC0415
     except ImportError as exc:
         raise SystemExit(f"ERROR: {exc}. Is pysdl2 installed? (pip install pysdl2)") from exc
     try:
@@ -471,7 +449,12 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     decoder_holder: dict[str, Any] = {"dec": None}
     client_holder: dict[str, Any] = {"client": None}
 
+    keyframe_needed = threading.Event()
+
     def need_keyframe() -> None:
+        keyframe_needed.set()
+
+    def request_keyframe() -> None:
         client: Any = client_holder["client"]
         if client is None:
             return
@@ -480,45 +463,49 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
         except Exception:
             log.exception("request_keyframe failed")
 
+    # The render thread alone creates, restarts and closes decoders. The
+    # network callback only borrows the published decoder long enough to
+    # enqueue a frame under state.lock; no pipe or SDL work happens there.
+    decoder: Any = None
+    decoder_generation = -1
+
     def ensure_decoder() -> Any:
+        nonlocal decoder, decoder_generation
         with state.lock:
             w, h, rot, hevc = state.width, state.height, state.rotation, state.is_hevc
-        if w <= 0 or h <= 0:
+            generation, ready = state.generation, state.have_display
+        if not ready or generation != decoder_generation:
+            with state.lock:
+                decoder_holder["dec"] = None
+            if decoder is not None:
+                decoder.close()
+                decoder = None
+        if not ready or w <= 0 or h <= 0:
             return None
-        cur: Any = decoder_holder["dec"]
-        if cur is not None and cur.width == w and cur.height == h \
-                and cur.is_hevc == hevc and cur.rotation == (rot % 360 if rot else 0):
-            return cur
-        if cur is not None:
-            try:
-                cur.close()
-            except Exception:
-                pass
-            decoder_holder["dec"] = None
-        if rot:
-            log.warning("rotation=%d: best-effort ffmpeg transpose; expect "
-                        "orientation quirks in v1", rot)
-        dec = decode_mod.FrameDecoder(
-            w, h, hevc,
-            decoder=cfg.decoder,  # type: ignore[arg-type]
-            rotation=rot,
-            on_need_keyframe=need_keyframe,
-        )
-        try:
-            backend: str = dec.start()
-        except Exception as exc:
-            log.error("could not start decoder: %s", exc)
-            return None
-        log.info("decoder backend=%s %dx%d %s rot=%d",
-                 backend, w, h, "hevc" if hevc else "h264", rot)
-        decoder_holder["dec"] = dec
-        return dec
+        if decoder is None:
+            decoder = decode_mod.FrameDecoder(
+                w, h, hevc, decoder=cfg.decoder, rotation=rot,
+                on_need_keyframe=need_keyframe,
+            )
+            decoder_generation = generation
+        if decoder.proc is None or decoder.is_dead():
+            with state.lock:
+                decoder_holder["dec"] = None
+            backend = decoder.start()
+            log.info("decoder backend=%s %dx%d %s rot=%d",
+                     backend, w, h, "hevc" if hevc else "h264", rot)
+            need_keyframe()
+        with state.lock:
+            if generation == state.generation and not stop.is_set():
+                decoder_holder["dec"] = decoder
+        return decoder
 
     # -- protocol callbacks -------------------------------------------------
     def on_display(w: int, h: int, rotation: int) -> None:
         with state.lock:
             state.width, state.height, state.rotation = int(w), int(h), int(rotation or 0)
             state.have_display = True
+            state.generation += 1
         log.info("display config %dx%d rot=%d", w, h, rotation or 0)
 
     def on_frame(payload: bytes, is_keyframe: bool, capture_ts: int) -> None:
@@ -528,26 +515,16 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
             first: bool = state.frames_seen == 1
         if first:
             log.info("first frame: %d bytes keyframe=%s", len(payload), bool(is_keyframe))
-        dec: Any = ensure_decoder()
-        if dec is None:
-            return
-        if dec.is_dead():
-            log.warning("decoder dead; re-init + forced keyframe")
-            try:
-                dec.close()
-            except Exception:
-                pass
-            decoder_holder["dec"] = None
-            need_keyframe()
-            dec = ensure_decoder()
-            if dec is None:
-                return
-        dec.feed(bytes(payload), bool(is_keyframe))
+        with state.lock:
+            dec = decoder_holder["dec"]
+            if dec is not None and decoder_generation == state.generation:
+                dec.feed(payload, bool(is_keyframe))
 
     def on_codec(is_hevc: bool) -> None:
         with state.lock:
             state.is_hevc = bool(is_hevc)
             state.have_codec = True
+            state.generation += 1
         log.info("codec selected: %s", "hevc" if is_hevc else "h264")
 
     def on_rtt(ms: float) -> None:
@@ -567,6 +544,11 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     def on_state(connected: bool) -> None:
         with state.lock:
             state.connected = bool(connected)
+            if not connected:
+                state.have_display = False
+                state.have_codec = False
+                state.generation += 1
+                decoder_holder["dec"] = None
         log.info("connection %s", "up" if connected else "down")
 
     try:
@@ -589,18 +571,22 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     disp = SdlDisplay(
         display_spec=cfg.display, fullscreen=cfg.fullscreen,
         hud_enabled=args.hud,
-    ) if True else None
-    assert disp is not None
+    )
 
     def on_touch(x: float, y: float, action: int,
                  count: int = 1, x2: float = 0.0, y2: float = 0.0) -> None:
         if not cfg.input_enabled:
             return
-        if not disp.has_focus:
+        if not disp.has_focus and action != 2:
             return
         client: Any = client_holder["client"]
         if client is None:
             return
+        with state.lock:
+            rotation = state.rotation
+        x, y = inverse_rotation(x, y, rotation)
+        if count == 2:
+            x2, y2 = inverse_rotation(x2, y2, rotation)
         try:
             client.send_touch(float(x), float(y), int(action),
                               count=int(count), x2=float(x2), y2=float(y2))
@@ -621,10 +607,9 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
     # TCP connect-only probe (no handshake). The supervisor owns the real
     # handshake/token validation and reconnection logic.
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(CONNECT_TIMEOUT_S)
-        sock.connect((cfg.host, cfg.port))
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(CONNECT_TIMEOUT_S)
+            sock.connect((cfg.host, cfg.port))
     except OSError as exc:
         raise SystemExit(f"ERROR: cannot reach {cfg.host}:{cfg.port}: {exc}") from exc
 
@@ -650,7 +635,7 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
             break
         time.sleep(0.05)
     with state.lock:
-        vw, vh = state.width, state.height
+        vw, vh = decode_mod.output_dims(state.width, state.height, state.rotation)
     if vw <= 0 or vh <= 0:
         log.error("no display config received; exiting")
         stop.set()
@@ -680,7 +665,7 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
             with state.lock:
                 shut: bool = state.shutdown
                 fps, mbps, rtt = state.fps, state.mbps, state.rtt_ms
-                cw, ch = state.width, state.height
+                cw, ch = decode_mod.output_dims(state.width, state.height, state.rotation)
             if shut:
                 break
             if (cw, ch) != last_open_dims and cw > 0 and ch > 0:
@@ -694,20 +679,16 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
             disp.poll()
             if disp.should_quit:
                 break
-            dec_now: Any = decoder_holder["dec"]
+            dec_now = ensure_decoder()
+            if keyframe_needed.is_set():
+                keyframe_needed.clear()
+                request_keyframe()
             if dec_now is not None:
-                if dec_now.is_dead():
-                    log.warning("decoder died in render loop; re-init + keyframe")
-                    try:
-                        dec_now.close()
-                    except Exception:
-                        pass
-                    decoder_holder["dec"] = None
-                    need_keyframe()
-                else:
-                    frame: Optional[bytes] = dec_now.read_newest()
-                    if frame is not None:
-                        disp.present(frame)
+                frame = dec_now.read_newest()
+                # A new config can arrive during decoder startup. Present
+                # only after the window has the matching output dimensions.
+                if frame is not None and (dec_now.out_w, dec_now.out_h) == last_open_dims:
+                    disp.present(frame)
             disp.set_stats(fps, mbps, rtt)
             now: float = time.monotonic()
             if now - last_ping >= 2.0:
@@ -725,12 +706,13 @@ def run_client(args: argparse.Namespace, cfg: ResolvedConfig) -> int:
             disp.close()
         except Exception:
             pass
-        dec_end: Any = decoder_holder.get("dec")
-        if dec_end is not None:
+        with state.lock:
+            decoder_holder["dec"] = None
+        if decoder is not None:
             try:
-                dec_end.close()
+                decoder.close()
             except Exception:
-                pass
+                log.exception("decoder cleanup failed")
         try:
             client.close()
         except Exception:

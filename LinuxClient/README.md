@@ -1,14 +1,13 @@
 # Telemachus Linux client
 
-The Linux client for Telemachus. The Mac runs the host unchanged; this
+The Linux client for Telemachus. The Mac remains the host; this
 receiver connects to it over the LAN, decodes the HEVC/H.264 stream with a
 system `ffmpeg` subprocess, and presents it in an SDL2 window.
 
-Target machine: Zorin OS 18.1 (Ubuntu 24.04 base), GNOME 46 on Wayland
-(Mutter), Ryzen 9 4900H + Radeon Vega iGPU (VAAPI) and GTX 1660 Ti (NVDEC).
-Target display: the external HP 22" 1920x1080@60.
+Requires Python 3.10 or newer, SDL2, and ffmpeg on a graphical Linux session.
+The default runtime is pinned to Python 3.12 for Ubuntu 24.04 and derivatives.
 
-## IMPORTANT: put the Mac in Wireless mode first
+## Put the Mac in Wireless mode first
 
 USB mode only accepts loopback connections (it is the `adb reverse` path for
 Android). A Linux workstation on the LAN is a non-loopback client, so it is
@@ -25,10 +24,13 @@ Mac-side steps:
 
 ## Install
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first,
+then run these commands from `LinuxClient/`.
+
 ```bash
 sudo apt update
 sudo apt install ffmpeg libsdl2-2.0-0
-pip install -r requirements.txt  # pysdl2; everything else is stdlib
+uv sync --frozen  # pysdl2 and the development tools, in an isolated environment
 ```
 
 VAAPI needs access to the render nodes:
@@ -40,7 +42,7 @@ sudo usermod -aG video,render "$USER"
 groups | tr ' ' '\n' | grep -E '^(video|render)$'
 ```
 
-`ffmpeg` must come from apt (not pip). If pysdl2 cannot find `libSDL2.so`,
+`ffmpeg` comes from apt. If pysdl2 cannot find `libSDL2.so`,
 install `libsdl2-2.0-0` (above); `pysdl2-dll` is only relevant outside Linux
 distro packaging.
 
@@ -52,9 +54,11 @@ distro packaging.
 
 Copies the client to `~/.local/share/telemachus` and symlinks
 `telemachus-linux` and `telemachus-scout` into `~/.local/bin` (the path the
-systemd unit's `ExecStart` uses). Idempotent. It does not install packages,
-enable a service, or pair the client. Add `~/.local/bin` to `PATH` if it is
-not already there.
+systemd unit's `ExecStart` uses). Reinstalling updates the client and its
+locked Python dependencies. Enable the service and pair separately.
+Add `~/.local/bin` to `PATH` if it is not already there. The installed
+launchers reuse the client's isolated environment, including when systemd
+starts the receiver.
 
 ## Pairing
 
@@ -154,8 +158,8 @@ two stay identical). Unit properties:
 
 - `ExecStart=%h/.local/bin/telemachus-linux` — install the client with
   `scripts/install-linux.sh` first, or edit the path.
-- `Environment=` carries `PATH`, `XDG_RUNTIME_DIR`, `SDL_VIDEODRIVER`,
-  `WAYLAND_DISPLAY`, and `DISPLAY`, because a user unit started outside a
+- `Environment=` carries `PATH`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
+  `DISPLAY`, because a user unit started outside a
   graphical login session cannot inherit them. Adjust `WAYLAND_DISPLAY` if
   your compositor names its socket differently.
 - `Restart=on-failure`, `RestartSec=3`, and `PartOf=graphical-session.target`
@@ -173,6 +177,33 @@ There is no `[Install]`-driven enable by default: the unit is written and can
 be started, but never enabled on your behalf. A headless start has nothing to
 pair with, so pair once first (`--qr`); the unit then reuses the saved token.
 
+## Start the Linux receiver from the Mac
+
+Both computers need Tailscale. Use an OpenSSH server on Linux for the remote
+command, and keep the Linux graphical session logged in.
+
+1. Install and pair the Linux client as above, then close its interactive
+   receiver window before starting the service.
+2. In the Mac's Wireless settings, copy the SSH authorization line from the
+   Linux client section.
+3. Open `telemachus-scout` on Linux, choose **Authorize Mac**, and paste that
+   line. Choose **Install service** as well.
+4. On the Mac, select the Linux peer, enter its actual Linux login username,
+   and choose **Start Linux client**. The Mac starts its wireless server
+   before asking Linux to start `telemachus-linux.service`.
+
+The authorized key has forwarding disabled and a forced command that can
+only start this user service. Pasted keys with another command or incompatible
+options are rejected. The Mac retains its dedicated SSH identity across starts.
+
+## Choose a Mac virtual display
+
+In Mac settings, choose **New extended display**, set **Virtual displays**
+to 1 through 4, then choose **Stream display**. Changing the count or selection
+restarts streaming. The desktops are arranged side by side; the protocol
+streams one at a time. The Linux `--display` option selects the receiving
+monitor on Linux independently of this Mac setting.
+
 
 ## Running
 
@@ -183,11 +214,11 @@ pair with, so pair once first (`--qr`); the unit then reuses the saved token.
 ./telemachus-linux --display 1920x1080@60      # same, by mode
 ./telemachus-linux --display 1                  # same, by SDL index
 ./telemachus-linux --windowed                   # window instead of fullscreen
-./telemachus-linux --decoder vaapi|cuda|sw      # override auto (vaapi -> cuda -> sw)
+./telemachus-linux --decoder sw               # or: auto, vaapi, cuda
 ./telemachus-linux --no-input                   # disable mouse forwarding
 ./telemachus-linux --hud                        # fps / Mbps / RTT overlay
 ./telemachus-linux --fake-payload               # synthetic frames, no Mac needed
-./telemachus-linux --selftest                   # loopback mock-server pipeline test
+./telemachus-linux --selftest                   # loopback protocol exercise with mock bytes
 ./telemachus-linux --discover-tailscale         # pick an online Tailscale host
 ./telemachus-scout                              # GUI Tailscale host picker
 ```
@@ -245,3 +276,15 @@ so no SDL_ttf dependency is needed.
 - Plaintext token + video: trusted LAN / direct Ethernet only.
 - `rotation != 0` is best-effort (ffmpeg transpose + a warning in the log).
 - Single active client: connecting a second client evicts the first.
+
+## Development checks
+
+```bash
+uv run --frozen python -m pytest -q
+uv run --frozen ruff check .
+uv audit --frozen
+```
+
+The tests include real software decoding with ffmpeg and offscreen SDL
+presentation when the system libraries are installed. CI runs Python 3.10,
+3.12, and 3.14 alongside the existing macOS and Android builds.

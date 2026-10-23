@@ -14,13 +14,25 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 log = logging.getLogger("telemachus.display")
 
 
 # -- pure geometry (no SDL dependency) -----------------------------------
+def inverse_rotation(x: float, y: float, rotation: int) -> tuple[float, float]:
+    """Map normalized coordinates in the rotated picture back to the Mac."""
+    rotation %= 360
+    if rotation == 90:
+        return y, 1.0 - x
+    if rotation == 180:
+        return 1.0 - x, 1.0 - y
+    if rotation == 270:
+        return 1.0 - y, x
+    return x, y
+
+
 def content_rect(
     view_w: int, view_h: int, video_w: int, video_h: int
 ) -> tuple[float, float, float, float]:
@@ -158,6 +170,9 @@ class SdlDisplay:
         self.has_focus: bool = True
         self._last_motion: float = 0.0
         self._left_down: bool = False
+        self._gesture_button: Optional[int] = None
+        self._gesture_count: int = 1
+        self._last_touch = (0.0, 0.0, 1, 0.0, 0.0)
         self._fps: float = 0.0
         self._mbps: float = 0.0
         self._rtt_ms: float = 0.0
@@ -171,6 +186,8 @@ class SdlDisplay:
 
         _ = sdl2.ext  # keep linters quiet; ext initialises subsystems
         self._sdl = sdl2
+        self.should_quit = False
+        self.has_focus = True
         self.video_w, self.video_h = video_w, video_h
         if sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO) != 0:
             raise RuntimeError(
@@ -294,27 +311,28 @@ class SdlDisplay:
         MOTION->1, UP->2. Shift+left-drag or right-drag synthesises
         count=2 with x2/y2. Motion throttled to ~120 Hz.
         """
-        import ctypes  # noqa: PLC0415
-
         sdl2: Any = self._sdl
         ev = sdl2.SDL_Event()
         while sdl2.SDL_PollEvent(ev) != 0:
             etype: int = ev.type
             if etype == sdl2.SDL_QUIT:
+                self._release_touch()
                 self.should_quit = True
             elif etype == sdl2.SDL_WINDOWEVENT:
                 wev = ev.window
                 if wev.event == sdl2.SDL_WINDOWEVENT_CLOSE:
+                    self._release_touch()
                     self.should_quit = True
                 elif wev.event in (sdl2.SDL_WINDOWEVENT_FOCUS_GAINED,):
                     self.has_focus = True
                 elif wev.event in (sdl2.SDL_WINDOWEVENT_FOCUS_LOST,):
                     self.has_focus = False
-                    self._left_down = False
+                    self._release_touch()
                 elif wev.event in (
                     sdl2.SDL_WINDOWEVENT_RESIZED,
                     sdl2.SDL_WINDOWEVENT_SIZE_CHANGED,
                 ):
+                    self._release_touch()
                     self._sync_window_size()
             elif etype == sdl2.SDL_KEYDOWN:
                 keysym = ev.key.keysym.sym
@@ -323,25 +341,32 @@ class SdlDisplay:
                     self.hud_enabled = not self.hud_enabled
                     log.info("HUD %s", "on" if self.hud_enabled else "off")
                 elif keysym == sdl2.SDLK_ESCAPE and not self.fullscreen:
+                    self._release_touch()
                     self.should_quit = True
             elif etype in (sdl2.SDL_MOUSEBUTTONDOWN, sdl2.SDL_MOUSEBUTTONUP):
                 if not self.has_focus or self.on_touch is None:
                     continue
                 btn = ev.button
                 pressed: bool = etype == sdl2.SDL_MOUSEBUTTONDOWN
-                action: Optional[int] = None
-                if btn.button == self._BTN_LEFT:
-                    action = 0 if pressed else 2
-                    self._left_down = pressed
-                elif btn.button == self._BTN_RIGHT:
-                    # Right-drag synthesises a two-finger gesture.
-                    action = 0 if pressed else 2
-                    self._left_down = pressed
-                else:
+                if btn.button not in (self._BTN_LEFT, self._BTN_RIGHT):
+                    continue
+                if pressed:
+                    if self._left_down:
+                        continue
+                    self._gesture_button = btn.button
+                    self._left_down = True
+                    self._last_motion = 0.0
+                    self._gesture_count = 2 if btn.button == self._BTN_RIGHT or self._shift_held() else 1
+                elif not self._left_down or btn.button != self._gesture_button:
                     continue
                 x, y = self._normalise(int(btn.x), int(btn.y))
-                count, x2, y2 = self._pinch_pair(int(btn.x), int(btn.y), x, y)
-                self.on_touch(x, y, action, count, x2, y2)
+                count, x2, y2 = self._pinch_pair(int(btn.x), int(btn.y), x, y,
+                                                two=self._gesture_count == 2)
+                self._last_touch = (x, y, count, x2, y2)
+                if pressed:
+                    self.on_touch(x, y, 0, count, x2, y2)
+                else:
+                    self._release_touch()
             elif etype == sdl2.SDL_MOUSEMOTION:
                 if not self.has_focus or self.on_touch is None or not self._left_down:
                     continue
@@ -351,9 +376,20 @@ class SdlDisplay:
                 self._last_motion = now
                 mot = ev.motion
                 x, y = self._normalise(int(mot.x), int(mot.y))
-                count, x2, y2 = self._pinch_pair(int(mot.x), int(mot.y), x, y)
+                count, x2, y2 = self._pinch_pair(int(mot.x), int(mot.y), x, y,
+                                                two=self._gesture_count == 2)
+                self._last_touch = (x, y, count, x2, y2)
                 self.on_touch(x, y, 1, count, x2, y2)
-        _ = ctypes  # event structs come from sdl2 bindings
+
+    def _release_touch(self) -> None:
+        """End an active gesture using its last coordinates and pointer count."""
+        if not self._left_down:
+            return
+        self._left_down = False
+        self._gesture_button = None
+        x, y, count, x2, y2 = self._last_touch
+        if self.on_touch is not None:
+            self.on_touch(x, y, 2, count, x2, y2)
 
     def _shift_held(self) -> bool:
         sdl2: Any = self._sdl
@@ -370,13 +406,11 @@ class SdlDisplay:
         return bool(buttons & sdl2.SDL_BUTTON(self._BTN_RIGHT))
 
     def _pinch_pair(
-        self, px: int, py: int, x: float, y: float
+        self, px: int, py: int, x: float, y: float, two: Optional[bool] = None
     ) -> tuple[int, float, float]:
         """Return (count, x2, y2); two-finger when shift/right is held."""
-        try:
-            two: bool = self._shift_held() or self._right_held()
-        except Exception:
-            two = False
+        if two is None:
+            two = self._shift_held() or self._right_held()
         if not two:
             return (1, 0.0, 0.0)
         # Mirror the point through the content-rect centre so a
@@ -402,6 +436,7 @@ class SdlDisplay:
 
     def close(self) -> None:
         """Destroy the texture/renderer/window and quit SDL video."""
+        self._release_touch()
         sdl2: Any = self._sdl
         try:
             if self._texture is not None:
