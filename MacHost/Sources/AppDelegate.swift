@@ -387,8 +387,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
         .sink { [weak self] in
+            guard let self else { return }
             Task { @MainActor in
-                await self?.restartServerForSettingsChange()
+                await self.restartServerForSettingsChange()
             }
         }
         .store(in: &cancellables)

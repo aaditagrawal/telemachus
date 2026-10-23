@@ -214,6 +214,9 @@ class SdlDisplay:
             )
         self._renderer = sdl2.SDL_CreateRenderer(self._window, -1, sdl2.SDL_RENDERER_ACCELERATED)
         if not self._renderer:
+            log.info("accelerated SDL renderer unavailable; using software rendering")
+            self._renderer = sdl2.SDL_CreateRenderer(self._window, -1, sdl2.SDL_RENDERER_SOFTWARE)
+        if not self._renderer:
             raise RuntimeError(
                 f"SDL_CreateRenderer failed: {sdl2.SDL_GetError().decode(errors='replace')}"
             )

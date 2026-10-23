@@ -7,6 +7,28 @@ import pytest
 from telemachus_client.display import SdlDisplay
 
 
+def test_software_rendering_when_acceleration_is_unavailable(monkeypatch):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "offscreen")
+    sdl = pytest.importorskip("sdl2")
+    create_renderer = sdl.SDL_CreateRenderer
+    requested = []
+
+    def renderer(window, index, flags):
+        requested.append(flags)
+        if flags == sdl.SDL_RENDERER_ACCELERATED:
+            return None
+        return create_renderer(window, index, flags)
+
+    monkeypatch.setattr(sdl, "SDL_CreateRenderer", renderer)
+    disp = SdlDisplay(fullscreen=False)
+    try:
+        disp.open(64, 48)
+        disp.present(bytes([128]) * (64 * 48 * 3 // 2))
+        assert requested == [sdl.SDL_RENDERER_ACCELERATED, sdl.SDL_RENDERER_SOFTWARE]
+    finally:
+        disp.close()
+
+
 @pytest.fixture
 def display(monkeypatch):
     monkeypatch.setenv("SDL_VIDEODRIVER", "offscreen")
