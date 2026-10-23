@@ -165,17 +165,17 @@ two stay identical). Unit properties:
 - `Restart=on-failure`, `RestartSec=3`, and `PartOf=graphical-session.target`
   (it stops with the session).
 
-Enabling at login is a deliberate, optional step:
+Enabling at graphical login is a deliberate, optional step:
 
 ```bash
-systemctl --user enable telemachus-linux.service   # start at login
+systemctl --user enable telemachus-linux.service   # start with the desktop session
 systemctl --user status telemachus-linux.service
 journalctl --user -u telemachus-linux.service -f
 ```
 
-There is no `[Install]`-driven enable by default: the unit is written and can
-be started, but never enabled on your behalf. A headless start has nothing to
-pair with, so pair once first (`--qr`); the unit then reuses the saved token.
+The installer leaves the unit disabled. When enabled, it starts with
+`graphical-session.target`. Pair once first (`--qr`); the unit then reuses the saved token.
+An on-demand start also needs an active graphical session.
 
 ## Start the Linux receiver from the Mac
 

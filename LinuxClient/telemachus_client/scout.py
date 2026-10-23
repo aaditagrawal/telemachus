@@ -108,7 +108,7 @@ def systemd_unit_text() -> str:
         "Environment=DISPLAY=:0\n"
         "\n"
         "[Install]\n"
-        "WantedBy=default.target\n"
+        "WantedBy=graphical-session.target\n"
     )
 
 

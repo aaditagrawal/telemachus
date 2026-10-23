@@ -52,7 +52,7 @@ def push(disp, sdl, kind, **fields):
     event.type = kind
     if kind in (sdl.SDL_MOUSEBUTTONDOWN, sdl.SDL_MOUSEBUTTONUP):
         event.button.button = fields.get("button", sdl.SDL_BUTTON_LEFT)
-        event.button.x, event.button.y = 16, 12
+        event.button.x, event.button.y = fields.get("x", 16), fields.get("y", 12)
     elif kind == sdl.SDL_MOUSEMOTION:
         event.motion.x, event.motion.y = 32, 24
     elif kind == sdl.SDL_WINDOWEVENT:
@@ -61,6 +61,69 @@ def push(disp, sdl, kind, **fields):
         event.key.keysym.sym = fields["key"]
     assert sdl.SDL_PushEvent(ctypes.byref(event)) == 1
     disp.poll()
+
+
+@pytest.mark.parametrize("window_size,point,destination", [
+    ((64, 48), (16, 12), (0, 0, 64, 48)),
+    ((64, 64), (16, 20), (0, 8, 64, 48)),
+    ((96, 48), (32, 12), (16, 0, 64, 48)),
+])
+def test_render_output_size_keeps_input_in_window_coordinates(
+    display, monkeypatch, window_size, point, destination,
+):
+    disp, sdl, touches = display
+    sdl.SDL_SetWindowSize(disp._window, *window_size)
+    disp._sync_window_size()
+    sdl.SDL_FlushEvents(sdl.SDL_FIRSTEVENT, sdl.SDL_LASTEVENT)
+    destinations = []
+
+    def output_size(renderer, width, height):
+        assert renderer is disp._renderer
+        width.value, height.value = window_size[0] * scale, window_size[1] * scale
+        return 0
+
+    def render_copy(renderer, texture, source, dest):
+        destinations.append((dest.x, dest.y, dest.w, dest.h))
+        return 0
+
+    monkeypatch.setattr(sdl, "SDL_GetRendererOutputSize", output_size)
+    monkeypatch.setattr(sdl, "SDL_RenderCopy", render_copy)
+    # Query on each frame so a change in display scaling updates the destination.
+    for scale in (1, 2):
+        disp.present(bytes([128]) * (64 * 48 * 3 // 2))
+        assert destinations[-1] == tuple(value * scale for value in destination)
+        assert (disp.win_w, disp.win_h) == window_size
+
+    push(disp, sdl, sdl.SDL_MOUSEBUTTONDOWN, button=sdl.SDL_BUTTON_RIGHT,
+         x=point[0], y=point[1])
+    assert touches == [(0.25, 0.25, 0, 2, 0.75, 0.75)]
+    push(disp, sdl, sdl.SDL_WINDOWEVENT, window_event=sdl.SDL_WINDOWEVENT_FOCUS_LOST)
+    assert touches[-1] == (0.25, 0.25, 2, 2, 0.75, 0.75)
+    assert len(touches) == 2
+
+
+@pytest.mark.parametrize("result,output_size", [
+    (-1, (128, 96)),
+    (0, (0, 96)),
+    (0, (128, 0)),
+    (0, (-1, 96)),
+])
+def test_unavailable_render_output_size_falls_back_to_window(display, monkeypatch, result, output_size):
+    disp, sdl, _ = display
+    destinations = []
+
+    def get_output_size(renderer, width, height):
+        width.value, height.value = output_size
+        return result
+
+    def render_copy(renderer, texture, source, dest):
+        destinations.append((dest.x, dest.y, dest.w, dest.h))
+        return 0
+
+    monkeypatch.setattr(sdl, "SDL_GetRendererOutputSize", get_output_size)
+    monkeypatch.setattr(sdl, "SDL_RenderCopy", render_copy)
+    disp.present(bytes([128]) * (64 * 48 * 3 // 2))
+    assert destinations == [(0, 0, 64, 48)]
 
 
 @pytest.mark.parametrize("ending", ["focus", "resize", "size_changed", "window_close", "quit", "escape", "close"])

@@ -96,49 +96,31 @@ class ResolvedConfig:
 
 def _resolve_qr(qr: str) -> tuple[str, int, bytes, str]:
     """Parse --qr via protocol.parse_qr (lazy import)."""
+    from telemachus_client.protocol import ProtocolError, parse_qr  # noqa: PLC0415
+
     try:
-        from telemachus_client.protocol import parse_qr  # noqa: PLC0415
-    except ImportError as exc:
-        raise SystemExit(
-            "ERROR: --qr needs telemachus_client/protocol.py "
-            "(owned by the protocol worker; not present yet)."
-        ) from exc
-    info: Any = parse_qr(qr)
-    host: str = getattr(info, "host", None) or getattr(info, "address", None) or "127.0.0.1"
-    port: int = int(getattr(info, "port", DEFAULT_PORT) or DEFAULT_PORT)
-    token: Any = getattr(info, "token", b"")
-    if isinstance(token, str):
-        token = _b64url_to_bytes(token)
-    name: str = getattr(info, "name", None) or getattr(info, "device_name", None) or DEFAULT_NAME
-    return (host, port, bytes(token), str(name))
+        info = parse_qr(qr)
+    except ProtocolError as exc:
+        raise ValueError(f"invalid --qr URI: {exc}") from None
+    return info.host, info.port, info.token, info.name
 
 
 def _load_file_config() -> dict[str, Any]:
-    """Return file-config values ({} when config.py is absent)."""
-    try:
-        from telemachus_client.config import load_config  # noqa: PLC0415
-    except ImportError:
-        return {}
-    try:
-        cfg: Any = load_config()
-    except Exception as exc:
-        log.warning("config file unreadable (%s); using defaults", exc)
-        return {}
-    if cfg is None:
-        return {}
-    if isinstance(cfg, dict):
-        return cfg
-    out: dict[str, Any] = {}
-    for key in ("host", "port", "token", "name", "decoder", "display",
-                "fullscreen", "input_enabled"):
-        if hasattr(cfg, key):
-            out[key] = getattr(cfg, key)
-    return out
+    """Read saved settings, reporting an unreadable configuration."""
+    from telemachus_client.config import load_config  # noqa: PLC0415
+
+    return load_config()
 
 
 def resolve_config(args: argparse.Namespace) -> ResolvedConfig:
     """Apply precedence CLI > config file > defaults (via build_config)."""
-    file_cfg: dict[str, Any] = _load_file_config()
+    try:
+        file_cfg = _load_file_config()
+    except ValueError as exc:
+        if not args.qr:
+            raise
+        log.warning("config file unreadable (%s); re-pairing with defaults", exc)
+        file_cfg = {}
 
     host: Optional[str] = args.host
     port: Optional[int] = args.port

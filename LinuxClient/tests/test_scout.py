@@ -282,6 +282,7 @@ class SystemdServiceTest(unittest.TestCase):
         self.assertNotIn("SDL_VIDEODRIVER=", text)
         self.assertIn("Restart=on-failure\n", text)
         self.assertIn("PartOf=graphical-session.target\n", text)
+        self.assertIn("WantedBy=graphical-session.target\n", text)
 
     def test_reference_unit_file_matches_the_generator(self):
         reference = scout._PROJECT_DIR / "systemd" / "telemachus-linux.service"

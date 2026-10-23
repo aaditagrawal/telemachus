@@ -1,6 +1,9 @@
 """Exercise the CLI/config boundary used by interactive and service starts."""
 
+import base64
+
 from telemachus_client import __main__ as cli
+from telemachus_client import config
 from telemachus_client.config import load_config, save_config
 import pytest
 
@@ -60,3 +63,57 @@ def test_malformed_config_reports_value_error(tmp_path):
     path.write_text("[client]\nhost = first\nhost = second\n")
     with pytest.raises(ValueError, match="invalid config"):
         load_config(path)
+
+
+@pytest.mark.parametrize("uri", [
+    "https://mac:54321?t=invalid",
+    "telemachus://mac:invalid?t=invalid",
+    "telemachus://mac:0?t=invalid",
+    "telemachus://mac:54321",
+    "telemachus://mac:54321?t=short",
+])
+def test_invalid_qr_reports_cli_error_without_starting(monkeypatch, uri):
+    monkeypatch.setattr(cli, "_load_file_config", dict)
+    monkeypatch.setattr(cli, "run_client", lambda *args: pytest.fail("client started"))
+    with pytest.raises(SystemExit, match="ERROR: bad config: invalid --qr URI"):
+        cli.main(["--qr", uri])
+
+
+@pytest.mark.parametrize("text", [
+    "[client]\nhost = first\nhost = second\n",
+    "[client]\nport = invalid\n",
+    "[client]\nfullscreen = invalid\n",
+])
+def test_bad_saved_config_stops_before_starting(monkeypatch, tmp_path, text):
+    path = tmp_path / "client.conf"
+    path.write_text(text)
+    monkeypatch.setattr(config, "CONFIG_PATH", path)
+    monkeypatch.setattr(cli, "run_client", lambda *args: pytest.fail("client started"))
+    with pytest.raises(SystemExit, match="ERROR: bad config: invalid config"):
+        cli.main([])
+    assert path.read_text() == text
+
+
+def test_qr_pairing_replaces_corrupt_config(monkeypatch, tmp_path):
+    path = tmp_path / "client.conf"
+    path.write_text("[client]\nhost = first\nhost = second\n")
+    monkeypatch.setattr(config, "CONFIG_PATH", path)
+    connected = []
+
+    def run_client(args, cfg):
+        connected.append(cfg)
+        return 0
+
+    monkeypatch.setattr(cli, "run_client", run_client)
+    token_b64 = base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("=")
+    uri = f"telemachus://new-mac:41000?t={token_b64}&name=Mac"
+    assert cli.main(["--qr", uri]) == 0
+    assert len(connected) == 1
+    assert (connected[0].host, connected[0].port, connected[0].token) == (
+        "new-mac", 41000, bytes(range(32)),
+    )
+    saved = load_config(path)
+    assert (saved["host"], saved["port"], saved["token"]) == (
+        "new-mac", 41000, token_b64,
+    )
+    assert path.stat().st_mode & 0o777 == 0o600

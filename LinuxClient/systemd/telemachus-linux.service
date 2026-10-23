@@ -17,4 +17,4 @@ Environment=WAYLAND_DISPLAY=wayland-0
 Environment=DISPLAY=:0
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

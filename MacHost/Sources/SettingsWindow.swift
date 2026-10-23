@@ -1881,10 +1881,7 @@ struct WirelessSection: View {
                         }
                     }
 
-                    if settings.linuxTriggerStatus.lowercased().contains("fail")
-                        || settings.linuxTriggerStatus.lowercased().contains("error")
-                        || settings.linuxTriggerStatus.lowercased().contains("denied")
-                        || settings.linuxTriggerStatus.lowercased().contains("timeout") {
+                    if !macAuthorizedKeysLine.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Install this Mac's public key on the Linux host (authorized_keys):")
                                 .font(.system(size: 10, weight: .medium))

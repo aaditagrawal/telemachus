@@ -283,14 +283,22 @@ class SdlDisplay:
         sdl2.SDL_UpdateTexture(self._texture, None, frame_nv12, self.video_w)
         sdl2.SDL_SetRenderDrawColor(self._renderer, 0, 0, 0, 255)
         sdl2.SDL_RenderClear(self._renderer)
-        ox, oy, cw, ch = content_rect(self.win_w, self.win_h, self.video_w, self.video_h)
         import ctypes
 
+        # Rendering uses drawable pixels; mouse input keeps window coordinates.
+        output_w = ctypes.c_int()
+        output_h = ctypes.c_int()
+        render_w, render_h = self.win_w, self.win_h
+        if (
+            sdl2.SDL_GetRendererOutputSize(self._renderer, output_w, output_h) == 0
+            and output_w.value > 0
+            and output_h.value > 0
+        ):
+            render_w, render_h = output_w.value, output_h.value
+        ox, oy, cw, ch = content_rect(render_w, render_h, self.video_w, self.video_h)
         dst = sdl2.SDL_Rect(int(ox), int(oy), int(cw), int(ch))
         sdl2.SDL_RenderCopy(self._renderer, self._texture, None, dst)
         sdl2.SDL_RenderPresent(self._renderer)
-        void_p = ctypes.c_void_p
-        _ = void_p  # readability anchor; dst must stay alive through RenderCopy
 
     def set_stats(self, fps: float, mbps: float, rtt_ms: float) -> None:
         """Update HUD telemetry (window title + ~1 Hz log when enabled)."""
