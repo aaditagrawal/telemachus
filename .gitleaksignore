@@ -2,5 +2,7 @@
 # SDL keyboard comparison, not a credential.
 cca1d86bd7763f75240f916d76fe855e6d619ac6:LinuxClient/telemachus_client/display.py:generic-api-key:325
 bb2193f706254f6d820c62fe50e0ef67ec8f3b51:LinuxClient/telemachus_client/display.py:generic-api-key:325
+8ee17402e780e76345f1b3d0a95b8fe4f6ef6aa5:LinuxClient/telemachus_client/display.py:generic-api-key:354
 # Public test fixture encoding bytes(range(32)), not a live pairing token.
 6446a1ee13da963528ff56988d9635baba099b8b:LinuxClient/tests/test_scout.py:generic-api-key:24
+8ee17402e780e76345f1b3d0a95b8fe4f6ef6aa5:LinuxClient/tests/test_scout.py:generic-api-key:26

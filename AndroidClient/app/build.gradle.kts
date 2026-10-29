@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 val appVersion = providers.environmentVariable("TELEMACHUS_VERSION").getOrElse("0.0.0")
@@ -37,7 +36,7 @@ if (releasePackagingRequested && !releaseSigningConfigured) {
 
 android {
     namespace = "dev.telemachus.display"
-    compileSdk = 34
+    compileSdk = 37
 
     // AGP reads this experimental property (values: "4k" | "16k" | "64k").
     // The obsolete gradle.properties key android.nativeLibrary.alignment is ignored.
@@ -75,16 +74,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-    }
-
     buildFeatures {
         viewBinding = true
     }
 
     sourceSets {
-        getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/oss-notices"))
+        getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/oss-notices").get().asFile)
     }
 
     testOptions {
@@ -97,6 +92,8 @@ val syncOpenSourceNotices by tasks.registering(Sync::class) {
     from(rootProject.projectDir.parentFile) {
         include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt")
     }
+    // Match the standalone release report while preserving legacy asset paths.
+    from(rootProject.projectDir.parentFile.resolve("licenses/Apache-2.0.txt"))
     into(layout.buildDirectory.dir("generated/oss-notices"))
 }
 
@@ -118,6 +115,14 @@ val generateReleaseDependencyLicenses by tasks.registering {
                 "com.google.zxing",
                 "org.jetbrains",
             )
+        // Reviewed from upstream license metadata and bundled notices.
+        val reviewedLicenses = mapOf(
+            "com.google.dagger:dagger" to "Apache License 2.0",
+            "com.google.j2objc:j2objc-annotations" to "Apache License 2.0",
+            "jakarta.inject:jakarta.inject-api" to "Apache License 2.0",
+            "javax.inject:javax.inject" to "Apache License 2.0",
+            "org.jspecify:jspecify" to "Apache License 2.0",
+        )
         val dependencies =
             configurations
                 .getByName("releaseRuntimeClasspath")
@@ -130,7 +135,8 @@ val generateReleaseDependencyLicenses by tasks.registering {
                 .sortedWith(compareBy({ it.first }, { it.second }, { it.third }))
         val unknown =
             dependencies.filter { dependency ->
-                permittedApacheGroups.none { prefix -> dependency.first.startsWith(prefix) }
+                "${dependency.first}:${dependency.second}" !in reviewedLicenses &&
+                    permittedApacheGroups.none { prefix -> dependency.first.startsWith(prefix) }
             }
         check(unknown.isEmpty()) {
             "Review and classify new runtime dependency licenses: " +
@@ -146,10 +152,11 @@ val generateReleaseDependencyLicenses by tasks.registering {
                 appendLine("| Dependency | License |")
                 appendLine("| --- | --- |")
                 dependencies.forEach { (group, name, version) ->
-                    appendLine("| `$group:$name:$version` | Apache License 2.0 |")
+                    val license = reviewedLicenses["$group:$name"] ?: "Apache License 2.0"
+                    appendLine("| `$group:$name:$version` | $license |")
                 }
                 appendLine()
-                appendLine("See `licenses/Apache-2.0.txt` for the complete license text.")
+                appendLine("See `Apache-2.0.txt` for the complete license text.")
             }
         val destination = outputFile.get().asFile
         destination.parentFile.mkdirs()
@@ -178,31 +185,43 @@ tasks
         }
     }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    }
+}
+
 dependencies {
+    constraints {
+        implementation("com.google.guava:guava:33.7.2-android") {
+            because("CVE-2026-102554 fixes unsafe collection deserialization in CameraX's transitive Guava dependency")
+        }
+    }
+
     //noinspection GradleDependency
-    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     //noinspection GradleDependency
-    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.appcompat:appcompat:1.8.0")
     //noinspection GradleDependency
-    implementation("com.google.android.material:material:1.11.0")
+    implementation("com.google.android.material:material:1.14.0")
     //noinspection GradleDependency
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
 
     // Wireless mode (0.8.0)
     // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
     // 1.3.x triggers Android 15+ "LOAD segment not aligned" warnings.
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-core:1.4.2")
+    implementation("androidx.camera:camera-core:1.6.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-camera2:1.6.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
     //noinspection GradleDependency
-    implementation("androidx.camera:camera-view:1.4.2")
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.zxing:core:3.5.4")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("org.robolectric:robolectric:4.17")
 }

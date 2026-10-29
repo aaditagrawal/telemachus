@@ -31,4 +31,12 @@ jobs:
 
       - name: Scan committed history and proposed changes
         run: |
-          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --exit-code 1 .
+          REPORT="$RUNNER_TEMP/gitleaks-report.json"
+          status=0
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --exit-code 1 \
+            --report-format json --report-path "$REPORT" . || status=$?
+          if [ -f "$REPORT" ]; then
+            # Print identifiers only; never print matches or secret values.
+            jq 'map({RuleID, File, StartLine, Commit, Fingerprint})' "$REPORT"
+          fi
+          exit "$status"
