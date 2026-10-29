@@ -90,7 +90,7 @@ android {
 
 val syncOpenSourceNotices by tasks.registering(Sync::class) {
     from(rootProject.projectDir.parentFile) {
-        include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt", "licenses/checker-qual-MIT.txt")
+        include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt")
     }
     into(layout.buildDirectory.dir("generated/oss-notices"))
 }
@@ -115,12 +115,10 @@ val generateReleaseDependencyLicenses by tasks.registering {
             )
         // Reviewed from upstream license metadata and bundled notices.
         val reviewedLicenses = mapOf(
-            "com.google.code.findbugs:jsr305" to "Apache License 2.0",
             "com.google.dagger:dagger" to "Apache License 2.0",
             "com.google.j2objc:j2objc-annotations" to "Apache License 2.0",
             "jakarta.inject:jakarta.inject-api" to "Apache License 2.0",
             "javax.inject:javax.inject" to "Apache License 2.0",
-            "org.checkerframework:checker-qual" to "MIT License",
             "org.jspecify:jspecify" to "Apache License 2.0",
         )
         val dependencies =
@@ -156,7 +154,7 @@ val generateReleaseDependencyLicenses by tasks.registering {
                     appendLine("| `$group:$name:$version` | $license |")
                 }
                 appendLine()
-                appendLine("See `licenses/Apache-2.0.txt` and `licenses/checker-qual-MIT.txt` for the complete license texts.")
+                appendLine("See `licenses/Apache-2.0.txt` for the complete license text.")
             }
         val destination = outputFile.get().asFile
         destination.parentFile.mkdirs()
@@ -192,6 +190,12 @@ kotlin {
 }
 
 dependencies {
+    constraints {
+        implementation("com.google.guava:guava:33.7.2-android") {
+            because("CVE-2026-102554 fixes unsafe collection deserialization in CameraX's transitive Guava dependency")
+        }
+    }
+
     //noinspection GradleDependency
     implementation("androidx.core:core-ktx:1.19.1")
     //noinspection GradleDependency
