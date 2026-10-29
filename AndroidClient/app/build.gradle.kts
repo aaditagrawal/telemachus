@@ -92,6 +92,8 @@ val syncOpenSourceNotices by tasks.registering(Sync::class) {
     from(rootProject.projectDir.parentFile) {
         include("LICENSE", "NOTICE", "licenses/Apache-2.0.txt")
     }
+    // Match the standalone release report while preserving legacy asset paths.
+    from(rootProject.projectDir.parentFile.resolve("licenses/Apache-2.0.txt"))
     into(layout.buildDirectory.dir("generated/oss-notices"))
 }
 
@@ -154,7 +156,7 @@ val generateReleaseDependencyLicenses by tasks.registering {
                     appendLine("| `$group:$name:$version` | $license |")
                 }
                 appendLine()
-                appendLine("See `licenses/Apache-2.0.txt` for the complete license text.")
+                appendLine("See `Apache-2.0.txt` for the complete license text.")
             }
         val destination = outputFile.get().asFile
         destination.parentFile.mkdirs()
