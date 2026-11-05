@@ -22,17 +22,17 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintSet
-import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.slider.Slider
 import com.google.android.material.switchmaterial.SwitchMaterial
-import dev.telemachus.display.databinding.ActivityMainBinding
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 private fun mainDiag(msg: String) = DiagLog.log("MA", msg)
 
@@ -40,15 +40,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wirelessController: WirelessTabController
     private val pairedHostStorage by lazy { PairedHostStorage(this) }
     private val cameraPerm by lazy { CameraPermissionManager(this) }
-    private lateinit var binding: ActivityMainBinding
+    private lateinit var binding: MainScreenViews
     private lateinit var prefs: PreferencesManager
     private var videoDecoder: VideoDecoder? = null
-    private var streamClient: StreamClient? = null
+
+    @Volatile private var streamClient: StreamClient? = null
+
+    @Volatile private var destroyed = false
+    private val connectionWorker = ConnectionWorker<StreamClient> { it.disconnect() }
+    private val checklistWorker = Executors.newSingleThreadExecutor()
+    private val pingWorker = Executors.newSingleThreadScheduledExecutor()
+    private var pingTask: ScheduledFuture<*>? = null
     private var currentSurfaceHolder: SurfaceHolder? = null
     private var displayWidth = 0 // 0 = no config received yet
     private var displayHeight = 0 // 0 = no config received yet
     private var displayRotation = 0 // 0, 90, 180, 270 degrees
-    private var pingJob: kotlinx.coroutines.Job? = null
 
     // For dragging stats overlay
     private var isDraggingOverlay = false
@@ -89,7 +95,7 @@ class MainActivity : AppCompatActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
-        binding = ActivityMainBinding.inflate(layoutInflater)
+        binding = MainScreenViews(View.inflate(this, R.layout.activity_main, null) as ConstraintLayout)
         setContentView(binding.root)
 
         // Apply fullscreen mode immediately
@@ -891,6 +897,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeDecoder(holder: SurfaceHolder) {
+        val client = streamClient ?: return
         mainDiag(
             "initializeDecoder called, surface=${holder.surface}, " +
                 "valid=${holder.surface.isValid}, res=${displayWidth}x$displayHeight",
@@ -910,7 +917,7 @@ class MainActivity : AppCompatActivity() {
                     windowManager.defaultDisplay
                 }
             val mime =
-                if (streamClient?.streamCodecIsHevc == false) {
+                if (client.streamCodecIsHevc == false) {
                     MediaFormat.MIMETYPE_VIDEO_AVC
                 } else {
                     MediaFormat.MIMETYPE_VIDEO_HEVC
@@ -918,12 +925,12 @@ class MainActivity : AppCompatActivity() {
             videoDecoder = VideoDecoder(holder.surface, displayObj, displayWidth, displayHeight, mime)
             // Wire up buffer release callback
             videoDecoder?.onFrameDecoded = { buffer ->
-                streamClient?.releaseBuffer(buffer)
+                client.releaseBuffer(buffer)
             }
             videoDecoder?.onKeyframeRequired = { force, reason ->
-                streamClient?.requestKeyframe(force = force, reason = reason)
+                client.requestKeyframe(force = force, reason = reason)
             }
-            streamClient?.requestKeyframe(force = true, reason = "decoder initialized")
+            client.requestKeyframe(force = true, reason = "decoder initialized")
             mainDiag("Decoder initialized OK ${displayWidth}x$displayHeight mime=$mime, videoDecoder=$videoDecoder")
             log("✅ Decoder initialized ${displayWidth}x$displayHeight $mime (${displayObj?.refreshRate ?: 60f}Hz)")
         } catch (e: Exception) {
@@ -938,29 +945,38 @@ class MainActivity : AppCompatActivity() {
     /**
      * Wire up all StreamClient callbacks. Used by both USB connect() and wireless connectWireless().
      */
-    private fun setupStreamClientCallbacks() {
-        streamClient?.onFrameReceived = { frameData, frameSize, timestamp, isKeyframe ->
-            val dec = videoDecoder
+    private fun postForClient(
+        client: StreamClient,
+        action: () -> Unit,
+    ) {
+        runOnUiThread {
+            if (!destroyed && streamClient === client) action()
+        }
+    }
+
+    private fun setupStreamClientCallbacks(client: StreamClient) {
+        client.onFrameReceived = { frameData, frameSize, timestamp, isKeyframe ->
+            val dec = if (!destroyed && streamClient === client) videoDecoder else null
             if (dec != null) {
                 dec.decode(frameData, frameSize, timestamp, isKeyframe)
             } else {
                 mainDiag("FRAME DROPPED: videoDecoder is null!")
-                streamClient?.releaseBuffer(frameData)
+                client.releaseBuffer(frameData)
             }
         }
 
         videoDecoder?.onFrameDecoded = { buffer ->
-            streamClient?.releaseBuffer(buffer)
+            client.releaseBuffer(buffer)
         }
 
-        streamClient?.onLatencyMeasured = { rttMs ->
-            runOnUiThread {
+        client.onLatencyMeasured = { rttMs ->
+            postForClient(client) {
                 binding.latencyText.text = String.format(Locale.US, "%.1f ms", rttMs)
             }
         }
 
-        streamClient?.onConnectionStatus = { connected ->
-            runOnUiThread {
+        client.onConnectionStatus = { connected ->
+            postForClient(client) {
                 isConnected = connected
                 setStreamingWindowState(connected)
                 if (connected) {
@@ -968,7 +984,7 @@ class MainActivity : AppCompatActivity() {
                     stopChecklistUpdates()
                     enableFullscreenMode()
                     // For wireless mode, transition controller to CONNECTED here —
-                    // not in MainActivity.connectWireless's coroutine after the
+                    // not after MainActivity.connectWireless's worker returns from the
                     // receive loop returns (that runs AFTER disconnect, causing
                     // a stale CONNECTED transition that hides the PAIRED_IDLE UI).
                     if (prefs.connectionMode == ConnectionMode.WIRELESS) {
@@ -999,8 +1015,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        streamClient?.onServerShutdown = {
-            runOnUiThread {
+        client.onServerShutdown = {
+            postForClient(client) {
                 automaticUsbConnect = false
                 autoConnectHandler.removeCallbacks(autoConnectRunnable)
                 log("📴 Server initiated shutdown — closing app")
@@ -1008,41 +1024,39 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        streamClient?.onDisplaySize = { width, height, rotation ->
-            mainDiag("onDisplaySize: ${width}x$height @ $rotation°")
-            warnIfAvcOnlyWithoutNegotiation()
-            displayWidth = width
-            displayHeight = height
-            displayRotation = rotation
-            if (videoDecoder != null) {
-                videoDecoder?.updateResolution(width, height)
-            } else {
-                val holder = currentSurfaceHolder
-                if (holder != null && holder.surface.isValid) {
-                    mainDiag("Display config arrived, initializing decoder ${width}x$height")
-                    runOnUiThread {
-                        if (videoDecoder == null) {
-                            initializeDecoder(holder)
+        client.onDisplaySize = { width, height, rotation ->
+            if (!destroyed && streamClient === client) {
+                mainDiag("onDisplaySize: ${width}x$height @ $rotation°")
+                warnIfAvcOnlyWithoutNegotiation()
+                displayWidth = width
+                displayHeight = height
+                displayRotation = rotation
+                val decoder = videoDecoder
+                if (decoder != null) {
+                    decoder.updateResolution(width, height)
+                } else {
+                    val holder = currentSurfaceHolder
+                    if (holder != null && holder.surface.isValid) {
+                        postForClient(client) {
+                            if (videoDecoder == null) initializeDecoder(holder)
                         }
                     }
-                } else {
-                    mainDiag("Display config arrived but no valid surface yet")
                 }
+                postForClient(client) {
+                    binding.resolutionText.text = getString(R.string.resolution_format, width, height)
+                    binding.connectButton.isEnabled = false
+                    binding.disconnectButton.isEnabled = true
+                    binding.statusIndicator.setBackgroundResource(R.drawable.status_indicator_green)
+                    updateStatus(getString(R.string.connected_streaming))
+                    showConnectedStreamUi()
+                    applyRotation(rotation)
+                }
+                log("Display: ${width}x$height @ $rotation°")
             }
-            runOnUiThread {
-                binding.resolutionText.text = getString(R.string.resolution_format, width, height)
-                binding.connectButton.isEnabled = false
-                binding.disconnectButton.isEnabled = true
-                binding.statusIndicator.setBackgroundResource(R.drawable.status_indicator_green)
-                updateStatus(getString(R.string.connected_streaming))
-                showConnectedStreamUi()
-                applyRotation(rotation)
-            }
-            log("Display: ${width}x$height @ $rotation°")
         }
 
-        streamClient?.onStats = { fps, mbps ->
-            runOnUiThread {
+        client.onStats = { fps, mbps ->
+            postForClient(client) {
                 binding.fpsText.text = String.format(Locale.US, "%.1f", fps)
                 binding.bitrateText.text = String.format(Locale.US, "%.1f Mbps", mbps)
             }
@@ -1064,23 +1078,28 @@ class MainActivity : AppCompatActivity() {
         ) {
             return
         }
-        lifecycleScope.launch(Dispatchers.IO) {
+        connectionAttemptInProgress = false
+        isConnected = false
+        stopPingTimer()
+        setStreamingWindowState(false)
+        val client = StreamClient(host, port, applicationContext)
+        streamClient = client
+        setupStreamClientCallbacks(client)
+        connectionWorker.start(client) {
             try {
                 log("Connecting wirelessly to $macName at $host:$port...")
-                streamClient = StreamClient(host, port, applicationContext)
-                setupStreamClientCallbacks()
-                streamClient?.connectWireless(token, deviceName)
+                client.connectWireless(token, deviceName)
                 // NOTE: onConnectSuccess is fired from the onConnectionStatus(true)
                 // listener (above) right after handshake OK — not here. This line
                 // would otherwise run AFTER the receive loop exits, i.e. AFTER
                 // disconnect, incorrectly transitioning back to CONNECTED.
             } catch (e: StreamClient.WirelessConnectError) {
-                runOnUiThread {
+                postForClient(client) {
                     wirelessController.onConnectError(e)
                 }
             } catch (e: Exception) {
                 log("Wireless connect failed: ${e.message}")
-                runOnUiThread {
+                postForClient(client) {
                     wirelessController.onConnectError(StreamClient.WirelessConnectError.NetworkUnreachable)
                 }
             }
@@ -1100,13 +1119,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         connectionAttemptInProgress = true
-        lifecycleScope.launch(Dispatchers.IO) {
+        val client = StreamClient(host, port, applicationContext)
+        streamClient = client
+        setupStreamClientCallbacks(client)
+        connectionWorker.start(client) {
             try {
                 log("Connecting to $host:$port...")
-
-                streamClient = StreamClient(host, port, applicationContext)
-                setupStreamClientCallbacks()
-                streamClient?.connect()
+                client.connect()
             } catch (e: Exception) {
                 val errorMessage =
                     when {
@@ -1136,16 +1155,11 @@ class MainActivity : AppCompatActivity() {
                     showError(errorMessage)
                 }
             } finally {
-                connectionAttemptInProgress = false
-                if (automatic && automaticUsbConnect) {
-                    // onConnectionStatus(false) is posted to the main thread. Checking
-                    // isConnected on this IO thread can race that callback and suppress
-                    // the retry after a server closes an otherwise successful socket.
-                    runOnUiThread {
-                        if (!isConnected) {
-                            showDisconnectedStreamUi()
-                            scheduleAutomaticUsbConnect()
-                        }
+                postForClient(client) {
+                    connectionAttemptInProgress = false
+                    if (automatic && automaticUsbConnect && !isConnected) {
+                        showDisconnectedStreamUi()
+                        scheduleAutomaticUsbConnect()
                     }
                 }
             }
@@ -1156,7 +1170,19 @@ class MainActivity : AppCompatActivity() {
         automaticUsbConnect = false
         autoConnectHandler.removeCallbacks(autoConnectRunnable)
         stopPingTimer()
-        streamClient?.disconnect()
+        streamClient = null
+        connectionWorker.cancel()
+        connectionAttemptInProgress = false
+        isConnected = false
+        setStreamingWindowState(false)
+        if (!destroyed) {
+            showDisconnectedStreamUi()
+            if (::wirelessController.isInitialized && prefs.connectionMode == ConnectionMode.WIRELESS) {
+                wirelessController.onStreamDisconnected()
+            } else if (prefs.connectionMode == ConnectionMode.USB) {
+                startChecklistUpdates()
+            }
+        }
         // Reset display config so next connect defers decoder init until config arrives
         displayWidth = 0
         displayHeight = 0
@@ -1165,18 +1191,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun startPingTimer() {
         stopPingTimer()
-        pingJob =
-            lifecycleScope.launch(Dispatchers.IO) {
-                while (true) {
-                    kotlinx.coroutines.delay(1000) // Ping every 1 second
-                    streamClient?.sendPing()
-                }
-            }
+        val client = streamClient ?: return
+        pingTask = pingWorker.scheduleWithFixedDelay({ client.sendPing() }, 1, 1, TimeUnit.SECONDS)
     }
 
     private fun stopPingTimer() {
-        pingJob?.cancel()
-        pingJob = null
+        pingTask?.cancel(false)
+        pingTask = null
     }
 
     private fun cleanup() {
@@ -1310,10 +1331,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        destroyed = true
         super.onDestroy()
         autoConnectHandler.removeCallbacks(autoConnectRunnable)
         stopChecklistUpdates()
         cleanup()
+        connectionWorker.close()
+        checklistWorker.shutdownNow()
+        pingWorker.shutdownNow()
     }
 
     companion object {
@@ -1388,18 +1413,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Check Mac Server (try to connect to port)
-        lifecycleScope.launch(Dispatchers.IO) {
-            // Double-check connection state before socket test
-            if (isConnected) return@launch
-
-            val port =
-                binding.portInput.text
-                    .toString()
-                    .toIntOrNull() ?: 54321
+        if (destroyed) return
+        val port = currentUsbPort()
+        checklistWorker.execute {
             val isServerRunning = checkServerRunning("127.0.0.1", port)
             runOnUiThread {
                 // Final check before updating UI
-                if (isConnected) return@runOnUiThread
+                if (destroyed || isConnected || !connectionDetailsVisible ||
+                    prefs.connectionMode != ConnectionMode.USB
+                ) {
+                    return@runOnUiThread
+                }
 
                 updateChecklistItem(binding.checkMacServer, isServerRunning)
 
