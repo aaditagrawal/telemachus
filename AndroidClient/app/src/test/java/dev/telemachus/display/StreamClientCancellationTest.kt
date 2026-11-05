@@ -1,44 +1,65 @@
 package dev.telemachus.display
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class StreamClientCancellationTest {
     @Test
-    fun disconnectCancelsPendingWirelessHandshake() =
-        runBlocking {
-            ServerSocket(0).use { server ->
-                val accepted = CountDownLatch(1)
-                val serverJob =
-                    async(Dispatchers.IO) {
-                        server.accept().use {
-                            accepted.countDown()
-                            it.getInputStream().read(ByteArray(256))
-                            Thread.sleep(2_000)
-                        }
-                    }
-                val client = StreamClient("127.0.0.1", server.localPort)
-                val connectJob =
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            client.connectWireless(ByteArray(32), "test-device")
-                        }
-                    }
-
-                assertTrue(withContext(Dispatchers.IO) { accepted.await(1, TimeUnit.SECONDS) })
-                client.disconnect()
-                withTimeout(1_000) {
-                    connectJob.await()
+    fun disconnectCancelsPendingWirelessHandshake() {
+        ServerSocket(0).use { server ->
+            val executor = Executors.newSingleThreadExecutor()
+            val client = StreamClient("127.0.0.1", server.localPort)
+            try {
+                val connect = executor.submit { runCatching { client.connectWireless(ByteArray(32), "test-device") } }
+                server.accept().use { peer ->
+                    peer.soTimeout = 1_000
+                    assertTrue(peer.getInputStream().read(ByteArray(256)) > 0)
+                    client.disconnect()
+                    connect.get(1, TimeUnit.SECONDS)
+                    assertEquals(-1, peer.getInputStream().read())
                 }
-                serverJob.cancel()
+            } finally {
+                client.disconnect()
+                executor.shutdownNow()
             }
         }
+    }
+
+    @Test
+    fun disconnectCancelsReceiveAndRejectsSubsequentConnectAndWrites() {
+        ServerSocket(0).use { server ->
+            val executor = Executors.newSingleThreadExecutor()
+            val connected = CountDownLatch(1)
+            val client = StreamClient("127.0.0.1", server.localPort)
+            client.onConnectionStatus = { if (it) connected.countDown() }
+            try {
+                val connect = executor.submit { client.connect() }
+                server.accept().use { peer ->
+                    peer.soTimeout = 1_000
+                    assertTrue(connected.await(1, TimeUnit.SECONDS))
+                    // Drain startup capability bytes before checking EOF.
+                    assertTrue(peer.getInputStream().read(ByteArray(3)) > 0)
+                    client.disconnect()
+                    connect.get(1, TimeUnit.SECONDS)
+                    while (peer.getInputStream().read() >= 0) { }
+                    client.sendPing()
+                    client.sendTouch(0.5f, 0.5f, 0)
+                    client.requestKeyframe(force = true)
+                }
+                var reconnected = false
+                client.onConnectionStatus = { if (it) reconnected = true }
+                client.connect()
+                assertFalse(reconnected)
+            } finally {
+                client.disconnect()
+                executor.shutdownNow()
+            }
+        }
+    }
 }

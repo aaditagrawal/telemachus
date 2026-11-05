@@ -7,11 +7,6 @@ import android.os.Build
 import android.os.Process
 import android.util.Log
 import android.view.WindowManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.DataInputStream
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -20,7 +15,7 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
 
 class StreamClient(
     private val host: String,
@@ -118,39 +113,62 @@ class StreamClient(
                 priority = Thread.MAX_PRIORITY
             }
         }
-    private val touchDispatcher = touchExecutor.asCoroutineDispatcher()
-    private val touchScope = CoroutineScope(touchDispatcher)
+    private val connectionLock = Any()
+    private var closed = false
 
-    suspend fun connect() =
-        withContext(Dispatchers.IO) {
-            try {
-                socket =
-                    Socket(host, port).apply {
-                        tcpNoDelay = true
-                    }
-                inputStream = DataInputStream(java.io.BufferedInputStream(socket?.getInputStream(), 65536))
-                outputStream = java.io.DataOutputStream(socket?.getOutputStream())
-                streamCodecIsHevc = true
-                codecNegotiated = false
-                advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
-                advertiseFrameMetadataSupport()
-                offerDeviceInfoCapability()
-                isConnected = true
-                lastKeyframeReceivedNs = 0L
-                synchronized(keyframeRequestLock) {
-                    lastKeyframeRequestNs = 0L
-                }
-
-                diagLog("Connected to $host:$port")
-                onConnectionStatus?.invoke(true)
-
-                receiveData()
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Connection error", e)
-                onConnectionStatus?.invoke(false)
-                cleanup()
+    private fun registerSocket(candidate: Socket) {
+        synchronized(connectionLock) {
+            if (closed) {
+                candidate.close()
+                throw IOException("Connection closed")
             }
+            socket = candidate
         }
+    }
+
+    private fun sendControl(action: () -> Unit) {
+        if (!isConnected) return
+        try {
+            touchExecutor.execute {
+                if (isConnected) action()
+            }
+        } catch (_: RejectedExecutionException) {
+            // Disconnect may close the queue between the check and submission.
+        }
+    }
+
+    fun connect() {
+        try {
+            val candidate = Socket()
+            registerSocket(candidate)
+            candidate.tcpNoDelay = true
+            candidate.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+            inputStream = DataInputStream(java.io.BufferedInputStream(candidate.getInputStream(), 65536))
+            outputStream = java.io.DataOutputStream(candidate.getOutputStream())
+            streamCodecIsHevc = true
+            codecNegotiated = false
+            advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
+            advertiseFrameMetadataSupport()
+            offerDeviceInfoCapability()
+            synchronized(connectionLock) {
+                if (closed) throw IOException("Connection closed")
+                isConnected = true
+            }
+            lastKeyframeReceivedNs = 0L
+            synchronized(keyframeRequestLock) {
+                lastKeyframeRequestNs = 0L
+            }
+
+            diagLog("Connected to $host:$port")
+            onConnectionStatus?.invoke(true)
+
+            receiveData()
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Connection error", e)
+            onConnectionStatus?.invoke(false)
+            cleanup()
+        }
+    }
 
     sealed class WirelessConnectError(
         msg: String,
@@ -166,10 +184,21 @@ class StreamClient(
      * Wireless connect: opens TCP, performs auth handshake, then resumes the existing receive loop on success.
      * Throws WirelessConnectError on any failure.
      */
-    suspend fun connectWireless(
+    fun connectWireless(
         token: ByteArray,
         deviceName: String,
-    ) = withContext(Dispatchers.IO) {
+    ) {
+        try {
+            connectWirelessSession(token, deviceName)
+        } finally {
+            cleanup()
+        }
+    }
+
+    private fun connectWirelessSession(
+        token: ByteArray,
+        deviceName: String,
+    ) {
         Log.i(TAG, "connectWireless: trying $host:$port (device=$deviceName, token bytes=${token.size})")
 
         // Force the socket onto the active WiFi network. On some Android setups
@@ -181,7 +210,7 @@ class StreamClient(
                 val sock = Socket()
                 // Register before connect/auth so Disconnect can cancel either
                 // blocking operation immediately.
-                socket = sock
+                registerSocket(sock)
                 sock.tcpNoDelay = true
                 val wifiNetwork =
                     context?.let { ctx ->
@@ -257,7 +286,6 @@ class StreamClient(
         when (status) {
             AuthHandshake.ResponseStatus.OK -> {
                 s.soTimeout = 0
-                socket = s
                 inputStream = DataInputStream(java.io.BufferedInputStream(s.getInputStream(), 65536))
                 outputStream = java.io.DataOutputStream(s.getOutputStream())
                 streamCodecIsHevc = true
@@ -265,7 +293,10 @@ class StreamClient(
                 advertiseAvcOnlyIfNeeded() // MUST precede type 8: type 8 can trigger the server's early protocol finish
                 advertiseFrameMetadataSupport()
                 offerDeviceInfoCapability()
-                isConnected = true
+                synchronized(connectionLock) {
+                    if (closed) throw IOException("Connection closed")
+                    isConnected = true
+                }
                 diagLog("Wireless connected to $host:$port")
                 onConnectionStatus?.invoke(true)
                 receiveData()
@@ -309,27 +340,28 @@ class StreamClient(
      * Mac settings UI can stop hardcoding a developer tablet. Uses wire type 11
      * (66 bytes) only after [MESSAGE_DEVICE_INFO_CAPABILITY] acceptance.
      */
-    private fun sendDeviceInfo() {
-        val out = outputStream ?: return
-        try {
-            val model = Build.MODEL
-            val modelBytes = model.toByteArray(Charsets.UTF_8)
-            val modelField = ByteArray(64)
-            modelBytes.copyInto(modelField, 0, 0, minOf(modelBytes.size, 63))
+    private fun sendDeviceInfo() =
+        sendControl {
+            val out = outputStream ?: return@sendControl
+            try {
+                val model = Build.MODEL
+                val modelBytes = model.toByteArray(Charsets.UTF_8)
+                val modelField = ByteArray(64)
+                modelBytes.copyInto(modelField, 0, 0, minOf(modelBytes.size, 63))
 
-            val refreshRate = resolveMaxRefreshRateHz()
-            val buffer = ByteArray(1 + 64 + 1)
-            buffer[0] = MESSAGE_CLIENT_DEVICE_INFO.toByte()
-            System.arraycopy(modelField, 0, buffer, 1, 64)
-            buffer[65] = (refreshRate.coerceIn(0, 255) and 0xFF).toByte()
+                val refreshRate = resolveMaxRefreshRateHz()
+                val buffer = ByteArray(1 + 64 + 1)
+                buffer[0] = MESSAGE_CLIENT_DEVICE_INFO.toByte()
+                System.arraycopy(modelField, 0, buffer, 1, 64)
+                buffer[65] = (refreshRate.coerceIn(0, 255) and 0xFF).toByte()
 
-            out.write(buffer)
-            out.flush()
-            diagLog("Sent device info: model=$model, maxRefreshRate=$refreshRate")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send device info", e)
+                out.write(buffer)
+                out.flush()
+                diagLog("Sent device info: model=$model, maxRefreshRate=$refreshRate")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send device info", e)
+            }
         }
-    }
 
     private fun resolveMaxRefreshRateHz(): Int {
         val appContext = context ?: return 60
@@ -364,76 +396,75 @@ class StreamClient(
         }
     }
 
-    private suspend fun receiveData() =
-        withContext(Dispatchers.IO) {
-            val input = inputStream ?: return@withContext
+    private fun receiveData() {
+        val input = inputStream ?: return
 
-            try {
-                while (isConnected) {
-                    val type = input.readByte()
+        try {
+            while (isConnected) {
+                val type = input.readByte()
 
-                    when (type.toInt()) {
-                        MESSAGE_VIDEO_FRAME -> {
-                            receiveVideoFrame(input, hasMetadata = false)
-                        }
+                when (type.toInt()) {
+                    MESSAGE_VIDEO_FRAME -> {
+                        receiveVideoFrame(input, hasMetadata = false)
+                    }
 
-                        MESSAGE_VIDEO_FRAME_WITH_METADATA -> {
-                            receiveVideoFrame(input, hasMetadata = true)
-                        }
+                    MESSAGE_VIDEO_FRAME_WITH_METADATA -> {
+                        receiveVideoFrame(input, hasMetadata = true)
+                    }
 
-                        1 -> { // Display size + rotation
-                            val width = input.readInt()
-                            val height = input.readInt()
-                            val rotation = input.readInt()
-                            diagLog("Display config: ${width}x$height @ $rotation°")
-                            onDisplaySize?.invoke(width, height, rotation)
-                        }
+                    1 -> { // Display size + rotation
+                        val width = input.readInt()
+                        val height = input.readInt()
+                        val rotation = input.readInt()
+                        diagLog("Display config: ${width}x$height @ $rotation°")
+                        onDisplaySize?.invoke(width, height, rotation)
+                    }
 
-                        5 -> { // Pong response — measure round-trip latency
-                            val buf = ByteArray(8)
-                            input.readFully(buf)
-                            val sentTime = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN).long
-                            val rtt = (System.nanoTime() - sentTime) / 1_000_000.0 // ms
-                            onLatencyMeasured?.invoke(rtt)
-                        }
+                    5 -> { // Pong response — measure round-trip latency
+                        val buf = ByteArray(8)
+                        input.readFully(buf)
+                        val sentTime = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN).long
+                        val rtt = (System.nanoTime() - sentTime) / 1_000_000.0 // ms
+                        onLatencyMeasured?.invoke(rtt)
+                    }
 
-                        MESSAGE_CODEC_SELECTED -> {
-                            val codecId = input.readByte().toInt()
-                            streamCodecIsHevc = codecId == 0
-                            codecNegotiated = true
-                            diagLog("Server selected codec: ${if (streamCodecIsHevc) "HEVC" else "H.264"}")
-                            onCodecSelected?.invoke(streamCodecIsHevc)
-                        }
+                    MESSAGE_CODEC_SELECTED -> {
+                        val codecId = input.readByte().toInt()
+                        streamCodecIsHevc = codecId == 0
+                        codecNegotiated = true
+                        diagLog("Server selected codec: ${if (streamCodecIsHevc) "HEVC" else "H.264"}")
+                        onCodecSelected?.invoke(streamCodecIsHevc)
+                    }
 
-                        MESSAGE_DEVICE_INFO_CAPABILITY -> {
-                            // Host accepted our offer — safe to send the payload.
-                            diagLog("Host accepted device-info capability")
-                            sendDeviceInfo()
-                        }
+                    MESSAGE_DEVICE_INFO_CAPABILITY -> {
+                        // Host accepted our offer — safe to send the payload.
+                        diagLog("Host accepted device-info capability")
+                        sendDeviceInfo()
+                    }
 
-                        MESSAGE_SERVER_SHUTDOWN -> {
-                            diagLog("Server shut down gracefully — closing")
-                            onServerShutdown?.invoke()
-                            break
-                        }
+                    MESSAGE_SERVER_SHUTDOWN -> {
+                        diagLog("Server shut down gracefully — closing")
+                        onServerShutdown?.invoke()
+                        break
+                    }
 
-                        else -> {
-                            Log.e(
-                                TAG,
-                                "Unknown message type: ${type.toInt()}, stream may be misaligned — disconnecting",
-                            )
-                            break
-                        }
+                    else -> {
+                        Log.e(
+                            TAG,
+                            "Unknown message type: ${type.toInt()}, stream may be misaligned — disconnecting",
+                        )
+                        break
                     }
                 }
-            } catch (e: IOException) {
-                if (isConnected) {
-                    Log.e(TAG, "❌ Read error", e)
-                }
-            } finally {
-                disconnect()
             }
+        } catch (e: IOException) {
+            if (isConnected) {
+                Log.e(TAG, "❌ Read error", e)
+            }
+        } finally {
+            disconnect()
         }
+    }
 
     fun sendTouch(
         x: Float,
@@ -445,7 +476,7 @@ class StreamClient(
     ) {
         if (!isConnected) return
 
-        touchScope.launch {
+        sendControl {
             try {
                 socket?.getOutputStream()?.let { out ->
                     val count = pointerCount.coerceIn(1, 2)
@@ -501,7 +532,7 @@ class StreamClient(
 
         val flags = if (force) KEYFRAME_REQUEST_FLAG_FORCE else 0
         diagLog("Requesting keyframe: reason=$reason, force=$force")
-        touchScope.launch {
+        sendControl {
             try {
                 outputStream?.let { out ->
                     out.write(byteArrayOf(MESSAGE_KEYFRAME_REQUEST.toByte(), flags.toByte()))
@@ -517,7 +548,7 @@ class StreamClient(
      */
     fun sendPing() {
         if (!isConnected) return
-        touchScope.launch {
+        sendControl {
             try {
                 socket?.getOutputStream()?.let { out ->
                     val buffer = ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN)
@@ -624,30 +655,22 @@ class StreamClient(
     }
 
     private fun cleanup() {
-        try {
-            // Closing the socket first interrupts a blocking connect/read.
-            socket?.close()
-            outputStream?.close()
-            inputStream?.close()
-
-            // Properly shutdown executor with timeout to prevent orphaned threads
-            touchExecutor.shutdown()
-            try {
-                if (!touchExecutor.awaitTermination(500, TimeUnit.MILLISECONDS)) {
-                    touchExecutor.shutdownNow()
-                    // Wait a bit more for forced shutdown
-                    touchExecutor.awaitTermination(200, TimeUnit.MILLISECONDS)
-                }
-            } catch (e: InterruptedException) {
-                touchExecutor.shutdownNow()
-                Thread.currentThread().interrupt()
+        val candidate =
+            synchronized(connectionLock) {
+                closed = true
+                isConnected = false
+                socket.also { socket = null }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during cleanup", e)
+        // Socket closure interrupts connect, authentication, reads and writes.
+        try {
+            candidate?.close()
+        } catch (e: IOException) {
+            Log.e(TAG, "Error closing socket", e)
+        } finally {
+            touchExecutor.shutdownNow()
+            outputStream = null
+            inputStream = null
         }
-        outputStream = null
-        inputStream = null
-        socket = null
     }
 
     private fun cleanupCandidateSocket(candidate: Socket? = socket) {

@@ -82,10 +82,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    buildFeatures {
-        viewBinding = true
-    }
-
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
@@ -194,12 +190,19 @@ tasks
     }
 
 dependencies {
+    constraints {
+        implementation("androidx.lifecycle:lifecycle-runtime:2.11.0") {
+            because("Keep retained AndroidX modules at their existing versions after removing the KTX root")
+        }
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0") {
+            because("Keep CameraX's retained coroutine dependency at its existing version")
+        }
+    }
+
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // Wireless mode (0.8.0)
     // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
