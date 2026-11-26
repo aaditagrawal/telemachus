@@ -207,7 +207,7 @@ dependencies {
     //noinspection GradleDependency
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     //noinspection GradleDependency
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.1")
 
     // Wireless mode (0.8.0)
     // CameraX 1.4.0+ ships a 16 KB-aligned libimage_processing_util_jni.so.
